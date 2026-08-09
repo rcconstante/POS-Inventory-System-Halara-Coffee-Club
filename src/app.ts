@@ -3,7 +3,7 @@ import {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
   Coffee, Download, Eye, EyeOff, FileText, LayoutDashboard, LoaderCircle, LogOut, Menu,
   Minus, PackagePlus, Plus, Printer, Receipt, Settings, ShieldCheck, ShoppingCart,
-  Tag, Trash2, Truck, Upload, WalletCards, X, createIcons, type Icons,
+  Tag, Trash2, Truck, Upload, UserRound, WalletCards, X, createIcons, type Icons,
 } from "lucide";
 import {
   api, type AppData, type Category, type NotificationItem, type PaymentMethod, type Product,
@@ -11,9 +11,9 @@ import {
   type UserSession,
 } from "./api";
 
-const logoUrl = new URL("../assets/Logo.png", import.meta.url).href;
-const loginHeroUrl = new URL("../assets/login-right.png", import.meta.url).href;
-const cashLogoUrl = new URL("../assets/money.png", import.meta.url).href;
+const logoUrl = new URL("../assets/Logo.webp", import.meta.url).href;
+const loginHeroUrl = new URL("../assets/login-right.webp", import.meta.url).href;
+const cashLogoUrl = new URL("../assets/money.webp", import.meta.url).href;
 const gcashLogoUrl = new URL("../assets/GCash_logo.svg.webp", import.meta.url).href;
 const mayaLogoUrl = new URL("../assets/maya.webp", import.meta.url).href;
 
@@ -21,7 +21,7 @@ const icons: Icons = {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
   Coffee, Download, Eye, EyeOff, FileText, LayoutDashboard, LoaderCircle, LogOut, Menu,
   Minus, PackagePlus, Plus, Printer, Receipt, Settings, ShieldCheck, ShoppingCart,
-  Tag, Trash2, Truck, Upload, WalletCards, X,
+  Tag, Trash2, Truck, Upload, UserRound, WalletCards, X,
 };
 
 type AdminRoute = "dashboard" | "sales" | "products" | "inventory" | "reports" | "settings";
