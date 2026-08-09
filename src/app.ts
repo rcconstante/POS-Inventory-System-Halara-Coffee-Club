@@ -215,7 +215,7 @@ function renderAccess(): void {
   }
 
   const isAdmin = ui.roleChoice === "admin";
-  const demoEmail = isAdmin ? "r.constante.dev@gmail.com" : "staff@halara.test";
+  const demoEmail = isAdmin ? "admin@halara.test" : "staff@halara.test";
   const demoPassword = isAdmin ? "Admin@12345!" : "Staff@12345!";
   app.innerHTML = `
     <main class="login-shell" id="main-content">
