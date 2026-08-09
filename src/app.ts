@@ -215,7 +215,7 @@ function renderAccess(): void {
   }
 
   const isAdmin = ui.roleChoice === "admin";
-  const demoEmail = isAdmin ? "admin@halara.test" : "staff@halara.test";
+  const demoEmail = isAdmin ? "r.constante.dev@gmail.com" : "staff@halara.test";
   const demoPassword = isAdmin ? "Admin@12345!" : "Staff@12345!";
   app.innerHTML = `
     <main class="login-shell" id="main-content">
@@ -311,7 +311,7 @@ function renderAdmin(): void {
             <span class="topbar-date">${formatDate(ui.reportRange.from)} – ${formatDate(ui.reportRange.to)}</span>
             <div class="notification-wrap"><button class="notification-button" data-action="notifications" aria-label="Open notifications" aria-expanded="${ui.notificationsOpen}">${icon("Bell")}<b data-notification-count>${ui.unread || ""}</b></button>${ui.notificationsOpen ? renderNotificationPopover() : ""}</div>
             <div class="account-wrap">
-              <button class="account-button" id="account-button">${avatarMarkup(session)}<div><strong>${escapeHtml(session.displayName)}</strong><small>Administrator</small></div>${icon("ChevronDown")}</button>
+              <button class="account-button" id="account-button">${avatarMarkup(session)}<div><strong>${escapeHtml(session.displayName)}</strong><small>Contributor</small></div>${icon("ChevronDown")}</button>
               <div class="account-menu ${ui.accountOpen ? "show" : ""}" id="account-menu"><button data-route="settings">${icon("Settings")} Account settings</button><button data-action="logout">${icon("LogOut")} Sign out</button></div>
             </div>
           </div>

@@ -21,7 +21,7 @@ the API, so they cannot accidentally be started separately.
 
 Default thesis accounts:
 
-- Admin: `admin@halara.test` / `Admin@12345!`
+- Contributor / Admin: `r.constante.dev@gmail.com` / `Admin@12345!`
 - Staff: `staff@halara.test` / `Staff@12345!`
 
 The default passwords stop working after they are changed in Settings.

@@ -5,7 +5,7 @@ test.describe.configure({ mode: "serial" });
 async function signIn(page: import("@playwright/test").Page, role: "admin" | "staff") {
   await page.goto("/");
   await page.locator(`[data-role="${role}"]`).click();
-  await page.locator('[name="email"]').fill(`${role}@halara.test`);
+  await page.locator('[name="email"]').fill(role === "admin" ? "r.constante.dev@gmail.com" : "staff@halara.test");
   await page.locator('[name="password"]').fill(role === "admin" ? "Admin@12345!" : "Staff@12345!");
   await page.getByRole("button", { name: "Sign in" }).click();
 }
@@ -24,7 +24,7 @@ test("desktop role selection and tablet Admin operations remain responsive", asy
 
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.locator('[data-role="admin"]').click();
-  await page.locator('[name="email"]').fill("admin@halara.test");
+  await page.locator('[name="email"]').fill("r.constante.dev@gmail.com");
   await page.locator('[name="password"]').fill("Admin@12345!");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Business at a glance" })).toBeVisible();
@@ -49,7 +49,7 @@ test("desktop role selection and tablet Admin operations remain responsive", asy
   await page.locator('[data-action="notifications"]').click();
   await expect(page.locator(".notification-popover")).toBeVisible();
   await expect(page.getByText("Iced Latte is running low")).toBeVisible();
-  await page.locator('[data-action="close-notifications"]').click();
+  await page.getByRole("button", { name: "Close notifications" }).click();
 
   await tabletAdminNavigate(page, "reports");
   await expect(page.getByRole("heading", { name: "Sales report", exact: true })).toBeVisible();

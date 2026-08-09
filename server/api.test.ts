@@ -35,8 +35,8 @@ describe("Halara local API", () => {
   });
 
   it("rejects incorrect credentials and authenticates seeded role accounts", async () => {
-    await request(app).post("/api/auth/login").send({ role: "admin", email: "admin@halara.test", password: "wrong" }).expect(401);
-    const adminLogin = await admin.post("/api/auth/login").send({ role: "admin", email: "admin@halara.test", password: "Admin@12345!" }).expect(200);
+    await request(app).post("/api/auth/login").send({ role: "admin", email: "r.constante.dev@gmail.com", password: "wrong" }).expect(401);
+    const adminLogin = await admin.post("/api/auth/login").send({ role: "admin", email: "r.constante.dev@gmail.com", password: "Admin@12345!" }).expect(200);
     adminCsrf = adminLogin.body.csrfToken as string;
     expect(adminLogin.body.user.role).toBe("admin");
     const staffLogin = await staff.post("/api/auth/login").send({ role: "staff", email: "staff@halara.test", password: "Staff@12345!" }).expect(200);
@@ -110,8 +110,8 @@ describe("Halara local API", () => {
     expect(profile.body.avatarUrl).toMatch(/^\/uploads\/avatars\/.+\.webp$/);
     await admin.post("/api/auth/change-password").set("x-csrf-token", adminCsrf)
       .send({ currentPassword: "Admin@12345!", newPassword: "Updated@12345!", confirmPassword: "Updated@12345!" }).expect(200);
-    await request(app).post("/api/auth/login").send({ role: "admin", email: "admin@halara.test", password: "Admin@12345!" }).expect(401);
-    await request(app).post("/api/auth/login").send({ role: "admin", email: "admin@halara.test", password: "Updated@12345!" }).expect(200);
+    await request(app).post("/api/auth/login").send({ role: "admin", email: "r.constante.dev@gmail.com", password: "Admin@12345!" }).expect(401);
+    await request(app).post("/api/auth/login").send({ role: "admin", email: "r.constante.dev@gmail.com", password: "Updated@12345!" }).expect(200);
     const stored = context.db.prepare("SELECT COUNT(*) AS count FROM products WHERE id = ?").get(productId) as { count: number };
     expect(stored.count).toBe(1);
     const movement = context.db.prepare("SELECT id FROM inventory_movements WHERE id = ?").get(movementId) as { id: string };

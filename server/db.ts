@@ -28,6 +28,8 @@ export async function createDatabase(dataDirectory?: string): Promise<DatabaseCo
   const profileMigrationPath = path.resolve(process.cwd(), "server", "sql", "002_profile.sql");
   const hasAvatarColumn = db.prepare("PRAGMA table_info(users)").all().some((column) => (column as { name?: string }).name === "avatar_path");
   if (!hasAvatarColumn) db.exec(await readFile(profileMigrationPath, "utf8"));
+  const hasContributorMigration = db.prepare("SELECT 1 FROM schema_migrations WHERE version = 3").get();
+  if (!hasContributorMigration) db.exec(await readFile(path.resolve(process.cwd(), "server", "sql", "003_contributor_identity.sql"), "utf8"));
   await seedDemoUsers(db);
   db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(new Date().toISOString());
 
@@ -45,7 +47,7 @@ async function seedDemoUsers(db: Database.Database): Promise<void> {
   const adminHash = await argon2.hash("Admin@12345!", { type: argon2.argon2id });
   const staffHash = await argon2.hash("Staff@12345!", { type: argon2.argon2id });
   const seed = db.transaction(() => {
-    insert.run(randomUUID(), "admin@halara.test", "Thesis Admin", "admin", adminHash);
+    insert.run(randomUUID(), "r.constante.dev@gmail.com", "Richmond Constante", "admin", adminHash);
     insert.run(randomUUID(), "staff@halara.test", "Thesis Staff", "staff", staffHash);
   });
   seed();
