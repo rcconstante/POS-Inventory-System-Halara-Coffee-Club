@@ -103,7 +103,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .demo-access em { color: var(--brown-600); font-size: .64rem; font-style: normal; font-weight: 700; }
 .demo-access p { margin: 7px 2px 0; color: var(--muted); font-size: .62rem; }
 .login-visual { min-width: 0; height: 100dvh; background: #21130d; overflow: hidden; }
-.login-visual img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.login-visual img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
 /* Shared application shell */
 
