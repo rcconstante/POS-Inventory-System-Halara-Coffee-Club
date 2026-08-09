@@ -2,7 +2,7 @@ import "./styles.css";
 import {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
   Coffee, Download, Eye, EyeOff, FileText, LayoutDashboard, LoaderCircle, LogOut, Menu,
-  Minus, PackagePlus, Plus, Printer, Receipt, Settings, ShieldCheck, ShoppingCart,
+  Minus, PackagePlus, Plus, Printer, Receipt, Search, Settings, ShieldCheck, ShoppingCart,
   Tag, Trash2, Truck, Upload, UserRound, WalletCards, X, createIcons, type Icons,
 } from "lucide";
 import {
@@ -20,7 +20,7 @@ const mayaLogoUrl = new URL("../assets/maya.webp", import.meta.url).href;
 const icons: Icons = {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
   Coffee, Download, Eye, EyeOff, FileText, LayoutDashboard, LoaderCircle, LogOut, Menu,
-  Minus, PackagePlus, Plus, Printer, Receipt, Settings, ShieldCheck, ShoppingCart,
+  Minus, PackagePlus, Plus, Printer, Receipt, Search, Settings, ShieldCheck, ShoppingCart,
   Tag, Trash2, Truck, Upload, UserRound, WalletCards, X,
 };
 
@@ -28,6 +28,10 @@ type AdminRoute = "dashboard" | "sales" | "products" | "inventory" | "reports" |
 type ProductTab = "products" | "categories";
 type StaffView = "dashboard" | "products" | "cart" | "payment" | "success" | "orders" | "inventory" | "account";
 type ToastKind = "success" | "error" | "info";
+
+const adminRoutes: readonly AdminRoute[] = ["dashboard", "sales", "products", "inventory", "reports", "settings"];
+const staffViews: readonly StaffView[] = ["dashboard", "products", "cart", "payment", "success", "orders", "inventory", "account"];
+const posStateKey = "halara-pos-workflow";
 
 interface CartItem { productId: string; quantity: number }
 
@@ -146,14 +150,84 @@ function avatarMarkup(session: UserSession, className = "avatar-circle"): string
     : `<span class="${className}">${escapeHtml(session.displayName.charAt(0).toUpperCase())}</span>`;
 }
 
+function locationParts(): string[] {
+  return window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+}
+
+function writeLocation(path: string, replace = false): void {
+  const next = `#/${path}`;
+  if (window.location.hash === next) return;
+  window.history[replace ? "replaceState" : "pushState"](null, "", next);
+}
+
+function restoreLocationState(): void {
+  const [area, view] = locationParts();
+  if (!ui.session) {
+    ui.roleChoice = area === "login" && (view === "admin" || view === "staff") ? view : null;
+    return;
+  }
+  if (ui.session.role === "admin") {
+    ui.route = area === "admin" && adminRoutes.includes(view as AdminRoute) ? view as AdminRoute : "dashboard";
+    return;
+  }
+  const requested = area === "staff" && staffViews.includes(view as StaffView) ? view as StaffView : "dashboard";
+  ui.staffView = requested === "payment" && !ui.cart.length
+    ? "products"
+    : requested === "success" && !ui.completedSale
+      ? "orders"
+      : requested;
+}
+
+function syncLocation(replace = false): void {
+  if (!ui.session) writeLocation(ui.roleChoice ? `login/${ui.roleChoice}` : "access", replace);
+  else if (ui.session.role === "admin") writeLocation(`admin/${ui.route}`, replace);
+  else writeLocation(`staff/${ui.staffView}`, replace);
+}
+
+function restorePosState(): void {
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(posStateKey) ?? "null") as {
+      cart?: CartItem[];
+      selectedPayment?: PaymentMethod | null;
+      completedSaleId?: string | null;
+    } | null;
+    ui.cart = (saved?.cart ?? []).flatMap((item) => {
+      const product = ui.data.products.find((candidate) => candidate.id === item.productId);
+      if (!product || !Number.isInteger(item.quantity) || item.quantity <= 0 || product.currentStock <= 0) return [];
+      return [{ productId: item.productId, quantity: Math.min(item.quantity, Math.floor(product.currentStock)) }];
+    });
+    ui.selectedPayment = saved?.selectedPayment === "Cash" || saved?.selectedPayment === "GCash" || saved?.selectedPayment === "Maya" ? saved.selectedPayment : null;
+    ui.completedSale = saved?.completedSaleId ? ui.data.sales.find((sale) => sale.id === saved.completedSaleId) ?? null : null;
+  } catch {
+    window.sessionStorage.removeItem(posStateKey);
+  }
+}
+
+function persistPosState(): void {
+  window.sessionStorage.setItem(posStateKey, JSON.stringify({
+    cart: ui.cart,
+    selectedPayment: ui.selectedPayment,
+    completedSaleId: ui.completedSale?.id ?? null,
+  }));
+}
+
 async function bootstrap(): Promise<void> {
   renderLoading("Opening your workspace");
   try {
     ui.session = await api.session();
     await refreshAll(false);
+    restorePosState();
+    restoreLocationState();
+    syncLocation(true);
+    if (ui.session.role === "admin" && ui.route === "reports") {
+      try { ui.report = await api.report(ui.reportRange.from, ui.reportRange.to); }
+      catch { ui.report = null; }
+    }
     startNotificationPolling();
   } catch {
     ui.session = null;
+    restoreLocationState();
+    syncLocation(true);
   } finally {
     ui.loading = false;
     render();
@@ -209,7 +283,7 @@ function renderAccess(): void {
       </main>`;
     hydrate(app);
     document.querySelectorAll<HTMLButtonElement>("[data-role]").forEach((button) => button.addEventListener("click", () => {
-      ui.roleChoice = button.dataset.role as UserRole; renderAccess();
+      ui.roleChoice = button.dataset.role as UserRole; syncLocation(); renderAccess();
     }));
     return;
   }
@@ -226,7 +300,7 @@ function renderAccess(): void {
           <div class="login-heading"><h1>${isAdmin ? "Admin" : "Staff"} sign in</h1><p>${isAdmin ? "Manage operations and business performance." : "Open the point-of-sale workspace."}</p></div>
           <form id="login-form" class="login-form" novalidate>
             <label class="field"><span>Email address</span><input name="email" type="email" autocomplete="email" placeholder="name@example.com" required /><small class="field-error" data-error="email"></small></label>
-            <label class="field"><span>Password</span><div class="password-input"><input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required /><button type="button" id="toggle-password" aria-label="Show password">${icon("Eye")}</button></div><small class="field-error" data-error="password"></small></label>
+            <label class="field"><span>Password</span><div class="password-input"><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required /><button type="button" data-password-toggle="login-password" aria-label="Show password">${icon("Eye")}</button></div><small class="field-error" data-error="password"></small></label>
             <p class="form-message" id="login-error" role="alert"></p>
             <button class="button primary wide" type="submit">Sign in</button>
           </form>
@@ -250,14 +324,8 @@ function roleCard(role: UserRole, iconName: string, title: string, copy: string)
 }
 
 function bindLogin(): void {
-  document.querySelector("#back-role")?.addEventListener("click", () => { ui.roleChoice = null; renderAccess(); });
-  document.querySelector("#toggle-password")?.addEventListener("click", (event) => {
-    const button = event.currentTarget as HTMLButtonElement;
-    const input = document.querySelector<HTMLInputElement>('[name="password"]');
-    if (!input) return;
-    input.type = input.type === "password" ? "text" : "password";
-    button.innerHTML = icon(input.type === "password" ? "Eye" : "EyeOff"); hydrate(button);
-  });
+  document.querySelector("#back-role")?.addEventListener("click", () => { ui.roleChoice = null; syncLocation(); renderAccess(); });
+  bindPasswordToggles(document.querySelector("#login-form") ?? document);
   document.querySelector("#fill-demo")?.addEventListener("click", (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const email = document.querySelector<HTMLInputElement>('[name="email"]');
@@ -277,6 +345,7 @@ function bindLogin(): void {
     try {
       ui.session = await api.login(ui.roleChoice!, email, password);
       ui.route = "dashboard"; ui.staffView = "dashboard";
+      syncLocation(true);
       await refreshAll(false); startNotificationPolling(); render();
       toast("Signed in successfully.", "success");
     } catch (error) {
@@ -375,7 +444,7 @@ function salesTable(sales: Sale[], compact = false): string {
 
 function renderProductsManagement(): string {
   const tabs = `<div class="tabs"><button data-product-tab="products" class="${ui.productTab === "products" ? "active" : ""}">Product list</button><button data-product-tab="categories" class="${ui.productTab === "categories" ? "active" : ""}">Categories</button></div>`;
-  if (ui.productTab === "categories") return `<section class="page-section">${pageHeading("Catalog", "Categories", "Organize products for the Admin and Staff workspaces", `<button class="button primary" data-action="add-category">${icon("Plus")} Add category</button>`)}${tabs}<div class="category-grid">${ui.data.categories.length ? ui.data.categories.map(categoryCard).join("") : emptyState("Tag", "No categories", "Create a category before adding products.")}</div></section>`;
+  if (ui.productTab === "categories") return `<section class="page-section">${pageHeading("Catalog", "Categories", "Organize products for the Admin and Staff workspaces", `<button class="button primary" data-action="add-category">${icon("Plus")} Add category</button>`)}${tabs}<div class="category-grid">${ui.data.categories.length ? ui.data.categories.map(categoryCard).join("") : `<div class="category-empty">${emptyState("Tag", "No categories yet", "Create your first category to start organizing products.")}</div>`}</div></section>`;
   const products = ui.data.products.filter((product) => product.name.toLowerCase().includes(ui.productSearch.toLowerCase()));
   return `<section class="page-section">${pageHeading("Catalog", "Products", "Manage prices, stock thresholds, and product photos", `<button class="button primary" data-action="add-product">${icon("Plus")} Add product</button>`)}${tabs}<div class="filter-bar"><label class="search-box">${icon("Search")}<input id="product-search" value="${escapeHtml(ui.productSearch)}" placeholder="Search products" /></label></div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Unit price</th><th>Status</th><th>Actions</th></tr></thead><tbody>${products.length ? products.map((product) => `<tr><td data-label="Product"><div class="product-cell">${productVisual(product)}<strong>${escapeHtml(product.name)}</strong></div></td><td data-label="Category">${escapeHtml(categoryName(product.categoryId))}</td><td data-label="Stock">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Unit price">${money.format(product.price)}</td><td data-label="Status">${statusPill(stockStatus(product))}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-product" data-id="${product.id}">Edit</button><button class="small-button danger" data-action="delete-product" data-id="${product.id}">${icon("Trash2")} Delete</button></div></td></tr>`).join("") : `<tr><td colspan="6">${emptyState("Box", "No products", "Add your first product or change the search.")}</td></tr>`}</tbody></table></div></article></section>`;
 }
@@ -393,13 +462,13 @@ function renderReports(): string {
   const report = ui.report;
   const summary = report?.summary;
   return `<section class="page-section">${pageHeading("Performance", "Sales report", "Metrics and exports are calculated from completed SQL transactions")}
-    <div class="report-toolbar"><label><span>From</span><input id="report-from" type="date" value="${ui.reportRange.from}" /></label><span>to</span><label><span>To</span><input id="report-to" type="date" value="${ui.reportRange.to}" /></label><button class="button primary" data-action="generate-report" ${ui.reportLoading ? "disabled" : ""}>${ui.reportLoading ? icon("LoaderCircle", "spin") : icon("Download")} Generate report</button></div>
-    ${ui.reportLoading ? `<div class="route-loading">${icon("LoaderCircle", "spin")}<p>Calculating report…</p></div>` : !report ? emptyState("BarChart3", "Report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Total sales", money.format((summary?.totalSalesCentavos ?? 0) / 100), "Completed revenue", "BarChart3", "accent")}${metric("Transactions", String(summary?.totalTransactions ?? 0), "Completed orders", "CircleCheck", "success")}${metric("Average sale", money.format((summary?.averageSaleCentavos ?? 0) / 100), "Per completed order", "Receipt")}</div><div class="report-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Sales over time</p><h3>Daily revenue</h3></div></div>${revenueBars(report.daily)}</article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Product mix</p><h3>Top sellers</h3></div></div><ol class="rank-list">${report.topProducts.length ? report.topProducts.slice(0, 7).map((product, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.quantity} units sold</small></div><b>${money.format(product.totalCentavos / 100)}</b></li>`).join("") : `<li>${emptyState("Box", "No completed sales", "Product rankings will appear here.")}</li>`}</ol></article><article class="panel payment-summary"><div class="panel-heading"><div><p class="eyebrow">Payment mix</p><h3>Payment methods</h3></div></div>${report.payments.length ? report.payments.map((item) => `<div><span>${escapeHtml(item.method)}<small>${item.transactions} transactions</small></span><strong>${money.format(item.totalCentavos / 100)}</strong></div>`).join("") : emptyState("WalletCards", "No payment activity", "Complete an order to populate this report.")}</article></div>`}
+    <div class="report-toolbar" aria-label="Report date range"><label><span>From</span><input id="report-from" type="date" value="${ui.reportRange.from}" /></label><span aria-hidden="true">to</span><label><span>To</span><input id="report-to" type="date" value="${ui.reportRange.to}" /></label><button class="button primary" data-action="generate-report" ${ui.reportLoading ? "disabled" : ""}>${ui.reportLoading ? icon("LoaderCircle", "spin") : icon("Download")} Generate report</button></div>
+    ${ui.reportLoading ? `<div class="route-loading">${icon("LoaderCircle", "spin")}<p>Calculating report…</p></div>` : !report ? emptyState("BarChart3", "Report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Total sales", money.format((summary?.totalSalesCentavos ?? 0) / 100), "Completed revenue", "BarChart3", "accent")}${metric("Transactions", String(summary?.totalTransactions ?? 0), "Completed orders", "CircleCheck", "success")}${metric("Average sale", money.format((summary?.averageSaleCentavos ?? 0) / 100), "Per completed order", "Receipt")}</div><div class="report-grid"><article class="panel report-chart"><div class="panel-heading"><div><p class="eyebrow">Sales over time</p><h3>Daily revenue</h3></div></div>${revenueBars(report.daily)}</article><article class="panel report-ranking"><div class="panel-heading"><div><p class="eyebrow">Product mix</p><h3>Top sellers</h3></div></div>${report.topProducts.length ? `<ol class="rank-list">${report.topProducts.slice(0, 7).map((product, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.quantity} units sold</small></div><b>${money.format(product.totalCentavos / 100)}</b></li>`).join("")}</ol>` : emptyState("Box", "No completed sales", "Product rankings will appear after the first completed order.")}</article><article class="panel payment-summary"><div class="panel-heading"><div><p class="eyebrow">Payment mix</p><h3>Payment methods</h3></div></div>${report.payments.length ? `<div class="payment-list">${report.payments.map((item) => `<div><span>${escapeHtml(item.method)}<small>${item.transactions} transaction${item.transactions === 1 ? "" : "s"}</small></span><strong>${money.format(item.totalCentavos / 100)}</strong></div>`).join("")}</div>` : emptyState("WalletCards", "No payment activity", "Payment methods will appear after the first completed order.")}</article></div>`}
   </section>`;
 }
 
 function revenueBars(days: ReportSummary["daily"]): string {
-  if (!days.length) return emptyState("BarChart3", "No completed sales", "Daily revenue will appear here.");
+  if (!days.some((day) => day.totalCentavos > 0)) return emptyState("BarChart3", "No revenue in this range", "Daily revenue will appear after a completed order.");
   const max = Math.max(...days.map((day) => day.totalCentavos), 1);
   return `<div class="bar-chart">${days.map((day) => `<div><span style="height:${Math.max(5, Math.round(day.totalCentavos / max * 100))}%" title="${money.format(day.totalCentavos / 100)}"></span><small>${day.date.slice(5).replace("-", "/")}</small></div>`).join("")}</div>`;
 }
@@ -412,14 +481,32 @@ function renderSettings(): string {
   return `<section class="page-section settings-page">
     <div class="settings-heading"><div><p class="eyebrow">Account</p><h2>Account &amp; Settings</h2><span>Manage your profile and password.</span></div></div>
     <div class="settings-stack">
-      <article class="settings-card"><div class="settings-card-heading"><div><p class="eyebrow">Basic details</p><h3>Personal information</h3><span>Update the name and photo shown across the workspace.</span></div></div><form id="profile-form" class="profile-form" enctype="multipart/form-data"><div class="profile-avatar-upload"><span id="avatar-preview">${avatarMarkup(session, "settings-avatar")}</span><label class="button secondary" for="avatar-input">${icon("Upload")} Change photo</label><input id="avatar-input" name="avatar" type="file" accept="image/jpeg,image/png,image/webp" /><small>JPG, PNG or WebP · max 5 MB</small><label class="remove-avatar"><input name="removeAvatar" type="checkbox" value="true" ${session.avatarUrl ? "" : "disabled"} /> Remove photo</label></div><div class="profile-fields"><label class="field"><span>First name</span><input name="firstName" value="${escapeHtml(firstName)}" maxlength="40" required /></label><label class="field"><span>Last name</span><input name="lastName" value="${escapeHtml(lastName)}" maxlength="40" /></label><label class="field wide"><span>Email address</span><input value="${escapeHtml(session.email)}" readonly /></label><p class="form-message" id="profile-message"></p><button class="button primary" type="submit">Save changes</button></div></form></article>
+      <article class="settings-card"><div class="settings-card-heading"><div><p class="eyebrow">Basic details</p><h3>Personal information</h3><span>Update the name and photo shown across the workspace.</span></div></div><form id="profile-form" class="profile-form" enctype="multipart/form-data"><div class="profile-avatar-upload"><div class="profile-avatar-preview" id="avatar-preview">${avatarMarkup(session, "settings-avatar")}</div><label class="button secondary" for="avatar-input">${icon("Upload")} Change photo</label><input id="avatar-input" name="avatar" type="file" accept="image/jpeg,image/png,image/webp" /><small>JPG, PNG or WebP · max 5 MB</small><label class="remove-avatar"><input name="removeAvatar" type="checkbox" value="true" ${session.avatarUrl ? "" : "disabled"} /> Remove photo</label></div><div class="profile-fields"><label class="field"><span>First name</span><input name="firstName" value="${escapeHtml(firstName)}" maxlength="40" required /></label><label class="field"><span>Last name</span><input name="lastName" value="${escapeHtml(lastName)}" maxlength="40" /></label><label class="field wide"><span>Email address</span><input value="${escapeHtml(session.email)}" readonly /></label><div class="profile-actions wide"><p class="form-message" id="profile-message"></p><button class="button primary profile-save" type="submit">${icon("Check")} Save profile</button></div></div></form></article>
       <article class="settings-card settings-password"><div class="settings-card-heading"><div><p class="eyebrow">Security</p><h3>Password</h3><span>Use a strong password to protect this account.</span></div>${icon("ShieldCheck")}</div>${passwordForm("admin-password-form")}</article>
     </div>
   </section>`;
 }
 
 function passwordForm(id: string): string {
-  return `<form class="password-form" id="${id}"><label class="field"><span>Current password</span><input name="currentPassword" type="password" autocomplete="current-password" required /></label><label class="field"><span>New password</span><input name="newPassword" type="password" autocomplete="new-password" minlength="12" required /><small>At least 12 characters with uppercase, lowercase, number and symbol.</small></label><label class="field"><span>Confirm new password</span><input name="confirmPassword" type="password" autocomplete="new-password" minlength="12" required /></label><p class="form-message" id="password-message"></p><button class="button primary" type="submit">Update password</button></form>`;
+  return `<form class="password-form" id="${id}">${passwordField(id, "currentPassword", "Current password", "current-password")}${passwordField(id, "newPassword", "New password", "new-password", "At least 12 characters with uppercase, lowercase, number and symbol.")}${passwordField(id, "confirmPassword", "Confirm new password", "new-password")}<p class="form-message" data-password-message></p><button class="button primary" type="submit">${icon("ShieldCheck")} Update password</button></form>`;
+}
+
+function passwordField(formId: string, name: string, label: string, autocomplete: string, help = ""): string {
+  const inputId = `${formId}-${name}`;
+  return `<label class="field"><span>${label}</span><div class="password-input"><input id="${inputId}" name="${name}" type="password" autocomplete="${autocomplete}" minlength="${name === "currentPassword" ? "1" : "12"}" required /><button type="button" data-password-toggle="${inputId}" aria-label="Show ${label.toLowerCase()}">${icon("Eye")}</button></div>${help ? `<small>${help}</small>` : ""}</label>`;
+}
+
+function bindPasswordToggles(root: ParentNode): void {
+  root.querySelectorAll<HTMLButtonElement>("[data-password-toggle]").forEach((button) => button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.passwordToggle ?? "") as HTMLInputElement | null;
+    if (!input) return;
+    const willShow = input.type === "password";
+    input.type = willShow ? "text" : "password";
+    const label = button.closest("label")?.querySelector(":scope > span")?.textContent?.toLowerCase() ?? "password";
+    button.setAttribute("aria-label", `${willShow ? "Hide" : "Show"} ${label}`);
+    button.innerHTML = icon(willShow ? "EyeOff" : "Eye");
+    hydrate(button);
+  }));
 }
 
 function bindAdmin(): void {
@@ -436,9 +523,17 @@ function bindAdmin(): void {
 
 function bindRouteButtons(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-route]").forEach((button) => button.addEventListener("click", async () => {
-    ui.route = button.dataset.route as AdminRoute; ui.navOpen = false; ui.accountOpen = false;
-    if (ui.route === "reports" && !ui.report) await loadReport(); else renderAdmin();
+    await navigateAdmin(button.dataset.route as AdminRoute);
   }));
+}
+
+async function navigateAdmin(route: AdminRoute, replace = false): Promise<void> {
+  ui.route = route;
+  ui.navOpen = false;
+  ui.accountOpen = false;
+  syncLocation(replace);
+  if (route === "reports" && !ui.report) await loadReport();
+  else renderAdmin();
 }
 
 function bindAdminActions(): void {
@@ -555,30 +650,40 @@ function bindStaff(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-staff-view]").forEach((button) => button.addEventListener("click", () => {
     const view = button.dataset.staffView as StaffView;
     if (view === "payment" && !ui.cart.length) return;
-    ui.staffView = view; renderStaff();
+    navigateStaff(view);
   }));
-  document.querySelectorAll<HTMLButtonElement>("[data-payment]").forEach((button) => button.addEventListener("click", () => { ui.selectedPayment = button.dataset.payment as PaymentMethod; renderStaff(); }));
+  document.querySelectorAll<HTMLButtonElement>("[data-payment]").forEach((button) => button.addEventListener("click", () => { ui.selectedPayment = button.dataset.payment as PaymentMethod; persistPosState(); renderStaff(); }));
   onAction("add-cart", (button) => addToCart(button.dataset.id!));
   onAction("cart-minus", (button) => changeCart(button.dataset.id!, -1));
   onAction("cart-plus", (button) => changeCart(button.dataset.id!, 1));
-  onAction("clear-cart", () => { ui.cart = []; renderStaff(); });
+  onAction("clear-cart", () => { ui.cart = []; ui.selectedPayment = null; persistPosState(); renderStaff(); });
   onAction("confirm-payment", confirmPayment);
   onAction("print", () => window.print());
-  onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; ui.staffView = "products"; renderStaff(); });
+  onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
   onAction("staff-sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
   document.querySelector<HTMLInputElement>("#pos-search")?.addEventListener("input", (event) => { ui.posSearch = (event.currentTarget as HTMLInputElement).value; renderStaff(); document.querySelector<HTMLInputElement>("#pos-search")?.focus(); });
   bindPasswordForm("#staff-password-form");
 }
 
+function navigateStaff(view: StaffView, replace = false): void {
+  ui.staffView = view;
+  persistPosState();
+  syncLocation(replace);
+  renderStaff();
+}
+
 function bindProfileForm(): void {
   const form = document.querySelector<HTMLFormElement>("#profile-form");
   const input = document.querySelector<HTMLInputElement>("#avatar-input");
+  let previewUrl: string | null = null;
   input?.addEventListener("change", () => {
     const file = input.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { setText("#profile-message", "Profile photos must be 5 MB or smaller."); input.value = ""; return; }
     const preview = document.querySelector<HTMLElement>("#avatar-preview");
-    if (preview) preview.innerHTML = `<img class="settings-avatar" src="${URL.createObjectURL(file)}" alt="Selected profile preview" />`;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(file);
+    if (preview) preview.innerHTML = `<img class="settings-avatar" src="${previewUrl}" alt="Selected profile preview" />`;
     const remove = document.querySelector<HTMLInputElement>('[name="removeAvatar"]');
     if (remove) remove.checked = false;
   });
@@ -592,11 +697,12 @@ function bindProfileForm(): void {
     setButtonBusy(submit, true, "Saving"); setText("#profile-message", "");
     try {
       ui.session = await api.updateProfile(data);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       renderAdmin();
       toast("Profile details saved.", "success");
     } catch (error) {
       setText("#profile-message", errorMessage(error));
-      setButtonBusy(submit, false, "Save changes");
+      setButtonBusy(submit, false, "Save profile", "Check");
     }
   });
 }
@@ -618,6 +724,7 @@ function addToCart(productId: string): void {
     if (item.quantity >= product.currentStock) { toast("No more stock is available for this product.", "error"); return; }
     item.quantity += 1;
   } else ui.cart.push({ productId, quantity: 1 });
+  persistPosState();
   renderStaff(); toast(`${product.name} added to the order.`, "success");
 }
 
@@ -629,6 +736,7 @@ function changeCart(productId: string, change: number): void {
   if (next <= 0) ui.cart = ui.cart.filter((entry) => entry.productId !== productId);
   else if (next <= product.currentStock) item.quantity = next;
   else toast("The requested quantity exceeds current stock.", "error");
+  persistPosState();
   renderStaff();
 }
 
@@ -641,7 +749,8 @@ async function confirmPayment(button: HTMLButtonElement): Promise<void> {
   const result = await api.createSale(ui.selectedPayment, ui.cart);
   await refreshAll(false);
   ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
-  ui.staffView = "success"; renderStaff();
+  persistPosState();
+  navigateStaff("success");
 }
 
 function openCategoryDialog(id?: string): void {
@@ -743,10 +852,9 @@ async function openNotification(button: HTMLButtonElement): Promise<void> {
   try {
     await api.readNotification(notificationId);
     closeNotifications();
-    if (ui.session?.role === "admin") ui.route = "inventory";
-    else ui.staffView = "inventory";
     await refreshAll(false);
-    render();
+    if (ui.session?.role === "admin") await navigateAdmin("inventory");
+    else navigateStaff("inventory");
   } catch (error) {
     toast(errorMessage(error), "error");
   }
@@ -796,21 +904,31 @@ async function completeMutation(message: string): Promise<void> {
 }
 
 function bindPasswordForm(selector: string): void {
-  document.querySelector<HTMLFormElement>(selector)?.addEventListener("submit", async (event) => {
+  const form = document.querySelector<HTMLFormElement>(selector);
+  if (!form) return;
+  bindPasswordToggles(form);
+  form.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = event.currentTarget as HTMLFormElement; const data = new FormData(form);
     const submit = form.querySelector<HTMLButtonElement>('[type="submit"]')!;
-    setButtonBusy(submit, true, "Updating"); setText("#password-message", "");
+    const message = form.querySelector<HTMLElement>("[data-password-message]");
+    setButtonBusy(submit, true, "Updating");
+    if (message) { message.textContent = ""; message.classList.remove("success"); }
     try {
       const result = await api.changePassword(String(data.get("currentPassword") ?? ""), String(data.get("newPassword") ?? ""), String(data.get("confirmPassword") ?? ""));
-      form.reset(); setText("#password-message", result.message, "success"); toast(result.message, "success");
-    } catch (error) { setText("#password-message", errorMessage(error)); }
-    finally { setButtonBusy(submit, false, "Update password"); }
+      form.reset();
+      if (message) { message.textContent = result.message; message.classList.add("success"); }
+      toast(result.message, "success");
+    } catch (error) {
+      if (message) message.textContent = errorMessage(error);
+    }
+    finally { setButtonBusy(submit, false, "Update password", "ShieldCheck"); }
   });
 }
 
 async function logout(): Promise<void> {
   try { await api.logout(); } catch { /* Clear the local UI even if the session already expired. */ }
-  window.clearInterval(notificationTimer); ui.session = null; ui.roleChoice = null; ui.data = emptyData(); ui.cart = []; ui.report = null; closeDialog(); render();
+  window.clearInterval(notificationTimer); ui.session = null; ui.roleChoice = null; ui.data = emptyData(); ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; ui.report = null;
+  window.sessionStorage.removeItem(posStateKey); closeDialog(); syncLocation(true); render();
 }
 
 function statusPill(status: string): string {
@@ -822,8 +940,10 @@ function emptyState(iconName: string, title: string, copy: string): string {
   return `<div class="empty-state">${icon(iconName)}<strong>${escapeHtml(title)}</strong><p>${escapeHtml(copy)}</p></div>`;
 }
 
-function setButtonBusy(button: HTMLButtonElement, busy: boolean, label: string): void {
-  button.disabled = busy; button.innerHTML = busy ? `${icon("LoaderCircle", "spin")} ${escapeHtml(label)}` : escapeHtml(label); hydrate(button);
+function setButtonBusy(button: HTMLButtonElement, busy: boolean, label: string, iconName = ""): void {
+  button.disabled = busy;
+  button.innerHTML = busy ? `${icon("LoaderCircle", "spin")} ${escapeHtml(label)}` : `${iconName ? icon(iconName) : ""}${escapeHtml(label)}`;
+  hydrate(button);
 }
 
 function setText(selector: string, message: string, className = ""): void {
@@ -840,5 +960,12 @@ function toast(message: string, kind: ToastKind): void {
   item.querySelector("button")?.addEventListener("click", () => item.remove()); toastRegion.append(item); hydrate(item);
   window.setTimeout(() => item.remove(), 4500);
 }
+
+window.addEventListener("popstate", () => {
+  restoreLocationState();
+  syncLocation(true);
+  if (ui.session?.role === "admin" && ui.route === "reports" && !ui.report) void loadReport();
+  else render();
+});
 
 void bootstrap();
