@@ -1,74 +1,60 @@
 # Halara Coffee Club POS and Inventory
 
-A responsive local full-stack point-of-sale, inventory, and reporting system.
-The browser interface uses a Node.js API, SQLite database, HTTP-only account
-sessions, and server-managed product image uploads.
+A responsive thesis point-of-sale, inventory, notification, and reporting
+application. The frontend is plain TypeScript/JavaScript, HTML, and CSS. Supabase
+provides authentication, PostgreSQL data, row-level security, transactional
+operations, and image storage.
 
-## Requirements
+## Supabase setup
 
-- Node.js 24 or newer
-- npm 11 or newer
+1. Open the Supabase SQL Editor for the project.
+2. Run `supabase/migrations/001_initial.sql` once.
+3. In **Authentication → Users**, create:
+   - `r.constante.dev@gmail.com` with password `Admin@12345!`
+   - `staff@halara.test` with password `Staff@12345!`
+4. Return to the SQL Editor and run `supabase/setup-users.sql`.
 
-## Start locally
+The first SQL file creates the application tables, indexes, storage buckets,
+row-level security policies, notification triggers, and transactional stock and
+sales functions. The second assigns the Admin and Staff roles to the two thesis
+accounts. Change the default passwords from the application after confirming
+that both accounts can sign in.
+
+## Local development
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. One development server now hosts both the UI and
-the API, so they cannot accidentally be started separately.
+Open `http://127.0.0.1:5173`.
 
-Default thesis accounts:
+The supplied Supabase project URL and publishable browser key are used as safe
+defaults. To use another project, copy `.env.example` to `.env.local` and set:
 
-- Contributor / Admin: `r.constante.dev@gmail.com` / `Admin@12345!`
-- Staff: `staff@halara.test` / `Staff@12345!`
-
-The default passwords stop working after they are changed in Settings.
-
-## Persistent files
-
-- SQLite database: `data/halara.sqlite`
-- Product photos: `data/uploads/products/`
-- SQL migration: `server/sql/001_initial.sql`
-
-Building or restarting the application does not remove these files. To
-explicitly create a fresh database containing only the two thesis accounts:
-
-```sh
-npm run db:reset
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
-## Production-style local run
+Never place a Supabase service-role key in the frontend or in a `VITE_`
+environment variable.
 
-```sh
-npm run build
-npm start
-```
+## Netlify deployment
 
-Open `http://127.0.0.1:4174`.
+The repository includes `netlify.toml`. Connect the GitHub repository in
+Netlify and use the detected settings:
 
-## Deploy with GitHub auto-deploy
+- Build command: `npm run build`
+- Publish directory: `dist`
 
-This application needs a normal Node.js server and persistent storage for its
-SQLite database and uploaded images. It should not be deployed as a static
-Netlify or Vercel site while using local SQLite storage.
-
-The included `render.yaml` deploys the complete application to Render with a
-persistent disk. In Render, choose **New → Blueprint**, connect this GitHub
-repository, and select the repository. Render reads `render.yaml`, builds the
-application, mounts the persistent `/var/data` disk, and automatically deploys
-every future push to `main`.
-
-The first deployment creates the database and the two thesis accounts. Keep
-the persistent disk attached: removing it resets the database and uploaded
-photos.
+Every push to the production branch triggers a new deployment. Supabase keeps
+the database, authentication records, and uploaded images independently of the
+Netlify build.
 
 ## Validation
 
 ```sh
 npm run typecheck
-npm test
-npm run test:e2e
 npm run build
 ```

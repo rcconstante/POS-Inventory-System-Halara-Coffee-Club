@@ -3,8 +3,6 @@ dist/
 dist-server/
 data/
 .test/
-test-results/
-playwright-report/
 .env
 .env.*
 !.env.example

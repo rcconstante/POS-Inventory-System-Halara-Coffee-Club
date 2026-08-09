@@ -200,7 +200,7 @@ function renderAccess(): void {
       <main class="access-page" id="main-content">
         <section class="access-card">
           <img class="access-logo" src="${logoUrl}" alt="Company logo" />
-          <div class="access-heading"><p>Secure local workspace</p><h1>Choose how you want to sign in</h1><span>Use the dashboard to manage the business or open the tablet POS.</span></div>
+          <div class="access-heading"><p>Secure cloud workspace</p><h1>Choose how you want to sign in</h1><span>Use the dashboard to manage the business or open the tablet POS.</span></div>
           <div class="role-grid">
             ${roleCard("admin", "ShieldCheck", "Admin", "Products, inventory, sales, reports and settings")}
             ${roleCard("staff", "UserRound", "Staff", "Orders, payments, receipts and stock visibility")}
@@ -301,7 +301,7 @@ function renderAdmin(): void {
           ${adminNav("reports", "BarChart3", "Reports")}
           ${adminNav("settings", "Settings", "Settings")}
         </nav>
-        <div class="database-status"><i></i><span><strong>Local database</strong><small>Connected and persistent</small></span></div>
+        <div class="database-status"><i></i><span><strong>Supabase</strong><small>Connected and persistent</small></span></div>
       </aside>
       <div class="admin-area">
         <header class="topbar">
@@ -352,7 +352,7 @@ function renderDashboard(): string {
   const total = completed.reduce((sum, sale) => sum + saleTotal(sale), 0);
   const alerts = ui.data.products.filter((product) => stockStatus(product) !== "Available");
   return `<section class="page-section">
-    ${pageHeading("Live operations", "Business at a glance", "Real data from the local SQL database")}
+    ${pageHeading("Live operations", "Business at a glance", "Real-time data from Supabase")}
     <div class="metric-grid">${metric("Total sales", money.format(total), "Selected 7-day period", "BarChart3", "accent")}${metric("Transactions", String(completed.length), "Completed orders", "Receipt")}${metric("Stock alerts", String(alerts.length), alerts.length ? "Needs attention" : "Inventory healthy", "CircleAlert", alerts.length ? "warning" : "success")}${metric("Products", String(ui.data.products.length), "Active catalog items", "Box")}</div>
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Recent activity</p><h3>Latest sales</h3></div><button class="text-button" data-route="sales">View all</button></div>${salesTable(ui.data.sales.slice(0, 5), true)}</article>
@@ -667,7 +667,7 @@ function bindImagePreview(): void {
 
 function openStockDialog(id?: string): void {
   const movement = ui.data.stockMovements.find((item) => item.id === id);
-  openDialog({ title: movement ? "Edit stock entry" : "Add stock", description: "Stock changes are recorded transactionally in the local database.", body: `<label class="field"><span>Product</span><select name="productId" ${movement ? "disabled" : ""}>${ui.data.products.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>Quantity added</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label></div>`, submitLabel: movement ? "Save changes" : "Add stock", onSubmit: async (form) => { const data = new FormData(form); const body = { productId: String(data.get("productId") ?? movement?.productId), quantity: Number(data.get("quantity")), date: String(data.get("date")), note: String(data.get("note") ?? "") }; if (movement) await api.updateStock(movement.id, body); else await api.createStock(body); await completeMutation(movement ? "Stock entry updated." : "Stock added."); } });
+  openDialog({ title: movement ? "Edit stock entry" : "Add stock", description: "Stock changes are recorded transactionally in Supabase.", body: `<label class="field"><span>Product</span><select name="productId" ${movement ? "disabled" : ""}>${ui.data.products.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>Quantity added</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label></div>`, submitLabel: movement ? "Save changes" : "Add stock", onSubmit: async (form) => { const data = new FormData(form); const body = { productId: String(data.get("productId") ?? movement?.productId), quantity: Number(data.get("quantity")), date: String(data.get("date")), note: String(data.get("note") ?? "") }; if (movement) await api.updateStock(movement.id, body); else await api.createStock(body); await completeMutation(movement ? "Stock entry updated." : "Stock added."); } });
 }
 
 function openSaleStatusDialog(id: string, status: SaleStatus): void {
