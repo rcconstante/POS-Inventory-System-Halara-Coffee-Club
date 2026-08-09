@@ -48,6 +48,22 @@ npm start
 
 Open `http://127.0.0.1:4174`.
 
+## Deploy with GitHub auto-deploy
+
+This application needs a normal Node.js server and persistent storage for its
+SQLite database and uploaded images. It should not be deployed as a static
+Netlify or Vercel site while using local SQLite storage.
+
+The included `render.yaml` deploys the complete application to Render with a
+persistent disk. In Render, choose **New → Blueprint**, connect this GitHub
+repository, and select the repository. Render reads `render.yaml`, builds the
+application, mounts the persistent `/var/data` disk, and automatically deploys
+every future push to `main`.
+
+The first deployment creates the database and the two thesis accounts. Keep
+the persistent disk attached: removing it resets the database and uploaded
+photos.
+
 ## Validation
 
 ```sh
