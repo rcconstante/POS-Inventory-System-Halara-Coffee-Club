@@ -16,6 +16,8 @@ const loginHeroUrl = new URL("../assets/login-right.webp", import.meta.url).href
 const cashLogoUrl = new URL("../assets/money.webp", import.meta.url).href;
 const gcashLogoUrl = new URL("../assets/GCash_logo.svg.webp", import.meta.url).href;
 const mayaLogoUrl = new URL("../assets/maya.webp", import.meta.url).href;
+const adminRoleUrl = new URL("../assets/Admin.png", import.meta.url).href;
+const staffRoleUrl = new URL("../assets/Staff.png", import.meta.url).href;
 
 const icons: Icons = {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
@@ -141,15 +143,24 @@ function saleTotal(sale: Sale): number {
 }
 
 function productVisual(product: Product, large = false): string {
+  if (product.currentStock <= 0) return "Out of stock";
+  return product.currentStock <= product.lowStockThreshold ? "Low stock" : "Available";
+}
+
+function saleTotal(sale: Sale): number {
+  return sale.total ?? sale.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+}
+
+function productVisual(product: Product, large = false): string {
   return product.imageUrl
     ? `<img class="product-photo ${large ? "large" : ""}" src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" />`
     : `<span class="product-fallback ${large ? "large" : ""}">${icon("Coffee")}</span>`;
 }
 
 function avatarMarkup(session: UserSession, className = "avatar-circle"): string {
-  return session.avatarUrl
-    ? `<img class="${className}" src="${escapeHtml(session.avatarUrl)}" alt="${escapeHtml(session.displayName)}" />`
-    : `<span class="${className}">${escapeHtml(session.displayName.charAt(0).toUpperCase())}</span>`;
+  const defaultAvatar = session.role === "admin" ? adminRoleUrl : staffRoleUrl;
+  const avatarSrc = session.avatarUrl || defaultAvatar;
+  return `<img class="${className}" src="${escapeHtml(avatarSrc)}" alt="${escapeHtml(session.displayName)}" />`;
 }
 
 function rawMaterials(): Product[] {
