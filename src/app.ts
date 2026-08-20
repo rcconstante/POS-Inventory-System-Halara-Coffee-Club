@@ -143,15 +143,6 @@ function saleTotal(sale: Sale): number {
 }
 
 function productVisual(product: Product, large = false): string {
-  if (product.currentStock <= 0) return "Out of stock";
-  return product.currentStock <= product.lowStockThreshold ? "Low stock" : "Available";
-}
-
-function saleTotal(sale: Sale): number {
-  return sale.total ?? sale.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-}
-
-function productVisual(product: Product, large = false): string {
   return product.imageUrl
     ? `<img class="product-photo ${large ? "large" : ""}" src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" />`
     : `<span class="product-fallback ${large ? "large" : ""}">${icon("Coffee")}</span>`;
@@ -296,39 +287,6 @@ function render(): void {
   else renderStaff();
 }
 
-async function refreshAll(shouldRender = true): Promise<void> {
-  const [data, notificationData] = await Promise.all([api.appData(), api.notifications()]);
-  ui.data = data;
-  ui.notifications = notificationData.notifications;
-  ui.unread = notificationData.unread;
-  if (shouldRender) render();
-}
-
-function startNotificationPolling(): void {
-  window.clearInterval(notificationTimer);
-  notificationTimer = window.setInterval(async () => {
-    if (!ui.session || document.hidden) return;
-    try {
-      const result = await api.notifications();
-      ui.notifications = result.notifications;
-      ui.unread = result.unread;
-      const badge = document.querySelector<HTMLElement>("[data-notification-count]");
-      if (badge) badge.textContent = result.unread ? String(result.unread) : "";
-    } catch { /* The next refresh retries quietly. */ }
-  }, 30_000);
-}
-
-function renderLoading(message: string): void {
-  app.innerHTML = `<main class="loading-screen"><img src="${logoUrl}" alt="Company logo" /><span>${icon("LoaderCircle", "spin")}</span><p>${escapeHtml(message)}</p></main>`;
-  hydrate(app);
-}
-
-function render(): void {
-  document.body.className = ui.session ? (ui.session.role === "staff" ? "staff-page" : "app-page") : "login-page";
-  if (!ui.session) renderAccess();
-  else if (ui.session.role === "admin") renderAdmin();
-  else renderStaff();
-}
 
 function renderAccess(): void {
   if (!ui.roleChoice) {
