@@ -37,6 +37,11 @@ const posStateKey = "halara-pos-workflow";
 
 interface CartItem { productId: string; quantity: number }
 
+interface InstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
 interface UiState {
   session: UserSession | null;
   roleChoice: UserRole | null;
@@ -100,6 +105,7 @@ const app = required<HTMLDivElement>("#app");
 const modalRoot = required<HTMLDivElement>("#modal-root");
 const toastRegion = required<HTMLDivElement>("#toast-region");
 let notificationTimer: number | undefined;
+let installPrompt: InstallPromptEvent | null = null;
 
 function required<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -131,6 +137,12 @@ function formatDate(value: string): string {
 
 function categoryName(id: string): string {
   return ui.data.categories.find((category) => category.id === id)?.name ?? "Uncategorized";
+}
+
+const untrackedFinishedCategories = new Set(["Pasta", "Not Coffee", "Tea Refreshers and Soda", "Add-ons"]);
+
+function categoryTracksInventory(id: string): boolean {
+  return !untrackedFinishedCategories.has(categoryName(id));
 }
 
 function stockStatus(product: Product): "Available" | "Low stock" | "Out of stock" {
@@ -207,7 +219,12 @@ function restorePosState(): void {
     ui.cart = [];
     for (const item of saved?.cart ?? []) {
       const product = ui.data.products.find((candidate) => candidate.id === item.productId);
-      if (!product || product.type !== "finished_product" || !product.recipe.length || !Number.isInteger(item.quantity) || item.quantity <= 0) continue;
+      if (!product || product.type !== "finished_product" || !Number.isInteger(item.quantity) || item.quantity <= 0) continue;
+      if (!product.tracksInventory) {
+        ui.cart.push({ productId: item.productId, quantity: item.quantity });
+        continue;
+      }
+      if (!product.recipe.length) continue;
       const available = Math.max(0, Math.min(...product.recipe.map((recipe) => Math.floor((remaining.get(recipe.ingredientId) ?? 0) / recipe.quantity))));
       const quantity = Math.min(item.quantity, available);
       if (quantity <= 0) continue;
@@ -227,6 +244,27 @@ function persistPosState(): void {
     selectedPayment: ui.selectedPayment,
     completedSaleId: ui.completedSale?.id ?? null,
   }));
+}
+
+function isInstalledApp(): boolean {
+  return window.matchMedia("(display-mode: standalone)").matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+function installAppButton(label = "Install Halara POS"): string {
+  return isInstalledApp() ? "" : `<button class="button secondary install-app-button" type="button" data-action="install-app">${icon("Download")} ${escapeHtml(label)}</button>`;
+}
+
+async function installApp(): Promise<void> {
+  if (installPrompt) {
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    installPrompt = null;
+    toast(choice.outcome === "accepted" ? "Halara POS was added to this device." : "Installation was cancelled.", choice.outcome === "accepted" ? "success" : "info");
+    return;
+  }
+  const isAppleMobile = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  toast(isAppleMobile ? "In Safari, tap Share, then Add to Home Screen." : "Open the browser menu and choose Install app or Add to Home screen.", "info");
 }
 
 async function bootstrap(): Promise<void> {
@@ -299,12 +337,14 @@ function renderAccess(): void {
             ${roleCard("admin", adminRoleUrl, "Admin", "Products, inventory, sales, reports and settings")}
             ${roleCard("staff", staffRoleUrl, "Staff", "Orders, payments, receipts and stock visibility")}
           </div>
+          ${installAppButton("Add POS to home screen")}
         </section>
       </main>`;
     hydrate(app);
     document.querySelectorAll<HTMLButtonElement>("[data-role]").forEach((button) => button.addEventListener("click", () => {
       ui.roleChoice = button.dataset.role as UserRole; syncLocation(); renderAccess();
     }));
+    onAction("install-app", installApp);
     return;
   }
 
@@ -474,8 +514,8 @@ function renderProductsManagement(): string {
   const products = ui.data.products.filter((product) => product.type === ui.productTab && product.name.toLowerCase().includes(ui.productSearch.toLowerCase()));
   const title = isFinished ? "Finished products" : "Raw materials";
   const description = isFinished ? "Manage POS sales items and the ingredient recipe for each serving" : "Manage stocked ingredients, units, and low-stock thresholds";
-  const recipeSummary = (product: Product): string => product.recipe.length ? product.recipe.map((item) => { const ingredient = ui.data.products.find((candidate) => candidate.id === item.ingredientId); return `${number.format(item.quantity)} ${ingredient?.unit ?? ""} ${ingredient?.name ?? "Missing ingredient"}`; }).join(", ") : "Recipe not configured";
-  return `<section class="page-section">${pageHeading("Catalog", title, description, `<button class="button primary" data-action="add-product">${icon("Plus")} Add ${isFinished ? "sales item" : "raw material"}</button>`)}${tabs}<div class="filter-bar"><label class="search-box">${icon("Search")}<input id="product-search" value="${escapeHtml(ui.productSearch)}" placeholder="Search ${isFinished ? "sales items" : "raw materials"}" /></label></div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th>${isFinished ? "<th>Recipe per serving</th><th>Can make</th><th>Unit price</th>" : "<th>On hand</th><th>Low-stock level</th><th>Status</th>"}<th>Actions</th></tr></thead><tbody>${products.length ? products.map((product) => `<tr><td data-label="Product"><div class="product-cell">${productVisual(product)}<strong>${escapeHtml(product.name)}</strong></div></td><td data-label="Category">${escapeHtml(categoryName(product.categoryId))}</td>${isFinished ? `<td data-label="Recipe">${escapeHtml(recipeSummary(product))}</td><td data-label="Can make">${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"}</td><td data-label="Unit price">${money.format(product.price)}</td>` : `<td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Low-stock level">${number.format(product.lowStockThreshold)} ${escapeHtml(product.unit)}</td><td data-label="Status">${statusPill(stockStatus(product))}</td>`}<td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-product" data-id="${product.id}">Edit</button><button class="small-button danger" data-action="delete-product" data-id="${product.id}">${icon("Trash2")} Delete</button></div></td></tr>`).join("") : `<tr><td colspan="6">${emptyState(isFinished ? "Coffee" : "Boxes", `No ${title.toLowerCase()}`, `Add the first ${isFinished ? "finished product and its recipe" : "ingredient or packaging material"}.`)}</td></tr>`}</tbody></table></div></article></section>`;
+  const recipeSummary = (product: Product): string => !product.tracksInventory ? "Inventory not tracked" : product.recipe.length ? product.recipe.map((item) => { const ingredient = ui.data.products.find((candidate) => candidate.id === item.ingredientId); return `${number.format(item.quantity)} ${ingredient?.unit ?? ""} ${ingredient?.name ?? "Missing ingredient"}`; }).join(", ") : "Recipe not configured";
+  return `<section class="page-section">${pageHeading("Catalog", title, description, `<button class="button primary" data-action="add-product">${icon("Plus")} Add ${isFinished ? "sales item" : "raw material"}</button>`)}${tabs}<div class="filter-bar"><label class="search-box">${icon("Search")}<input id="product-search" value="${escapeHtml(ui.productSearch)}" placeholder="Search ${isFinished ? "sales items" : "raw materials"}" /></label></div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th>${isFinished ? "<th>Recipe per serving</th><th>Availability</th><th>Unit price</th>" : "<th>On hand</th><th>Low-stock level</th><th>Status</th>"}<th>Actions</th></tr></thead><tbody>${products.length ? products.map((product) => `<tr><td data-label="Product"><div class="product-cell">${productVisual(product)}<strong>${escapeHtml(product.name)}</strong></div></td><td data-label="Category">${escapeHtml(categoryName(product.categoryId))}</td>${isFinished ? `<td data-label="Recipe">${escapeHtml(recipeSummary(product))}</td><td data-label="Availability">${product.tracksInventory ? `${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"}` : "Not inventory-tracked"}</td><td data-label="Unit price">${money.format(product.price)}</td>` : `<td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Low-stock level">${number.format(product.lowStockThreshold)} ${escapeHtml(product.unit)}</td><td data-label="Status">${statusPill(stockStatus(product))}</td>`}<td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-product" data-id="${product.id}">Edit</button><button class="small-button danger" data-action="delete-product" data-id="${product.id}">${icon("Trash2")} Delete</button></div></td></tr>`).join("") : `<tr><td colspan="6">${emptyState(isFinished ? "Coffee" : "Boxes", `No ${title.toLowerCase()}`, `Add the first ${isFinished ? "finished product and its recipe" : "ingredient or packaging material"}.`)}</td></tr>`}</tbody></table></div></article></section>`;
 }
 
 function categoryCard(category: Category): string {
@@ -646,7 +686,7 @@ function renderStaffProducts(): string {
   const categories = ui.data.categories.filter((category) => allProducts.some((product) => product.categoryId === category.id));
   const products = allProducts.filter((product) => (ui.posCategory === "all" || product.categoryId === ui.posCategory) && product.name.toLowerCase().includes(ui.posSearch.toLowerCase()));
   const categoryFilters = `<div class="pos-category-filter" role="group" aria-label="Filter menu by category"><button data-pos-category="all" aria-pressed="${ui.posCategory === "all"}" class="${ui.posCategory === "all" ? "active" : ""}">All</button>${categories.map((category) => `<button data-pos-category="${category.id}" aria-pressed="${ui.posCategory === category.id}" class="${ui.posCategory === category.id ? "active" : ""}">${escapeHtml(category.name)}</button>`).join("")}</div>`;
-  return `<div class="staff-screen products-screen"><div class="staff-heading row"><div><p>Point of sale</p><h1>New order</h1></div><button class="cart-button" data-staff-view="cart">${icon("ShoppingCart")}<span>${cartCount()}</span></button></div><label class="search-box large">${icon("Search")}<input id="pos-search" value="${escapeHtml(ui.posSearch)}" placeholder="Search finished products" /></label>${categoryFilters}<div class="staff-product-grid">${products.length ? products.map((product) => `<article class="staff-product ${product.availableStock <= 0 ? "sold-out" : ""}">${productVisual(product, true)}<div><h2 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h2><p>${escapeHtml(categoryName(product.categoryId))}</p><strong>${money.format(product.price)}</strong><small>${product.availableStock <= 0 ? "Unavailable — configure recipe or restock" : `${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"} available`}</small></div><button data-action="add-cart" data-id="${product.id}" ${product.availableStock <= 0 ? "disabled" : ""} aria-label="Add ${escapeHtml(product.name)}">${icon("Plus")}</button></article>`).join("") : emptyState("Coffee", "No menu items found", "Try another category or search term.")}</div></div>`;
+  return `<div class="staff-screen products-screen"><div class="staff-heading row"><div><p>Point of sale</p><h1>New order</h1></div><button class="cart-button" data-staff-view="cart">${icon("ShoppingCart")}<span>${cartCount()}</span></button></div><label class="search-box large">${icon("Search")}<input id="pos-search" value="${escapeHtml(ui.posSearch)}" placeholder="Search finished products" /></label>${categoryFilters}<div class="staff-product-grid">${products.length ? products.map((product) => { const soldOut = product.tracksInventory && product.availableStock <= 0; return `<article class="staff-product ${soldOut ? "sold-out" : ""}">${productVisual(product, true)}<div><h2 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h2><p>${escapeHtml(categoryName(product.categoryId))}</p><strong>${money.format(product.price)}</strong><small>${!product.tracksInventory ? "Available · inventory not tracked" : soldOut ? "Unavailable — configure recipe or restock" : `${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"} available`}</small></div><button data-action="add-cart" data-id="${product.id}" ${soldOut ? "disabled" : ""} aria-label="Add ${escapeHtml(product.name)}">${icon("Plus")}</button></article>`; }).join("") : emptyState("Coffee", "No menu items found", "Try another category or search term.")}</div></div>`;
 }
 
 function renderCart(): string {
@@ -677,7 +717,7 @@ function renderStaffInventory(): string {
 }
 
 function renderStaffAccount(): string {
-  return `<div class="staff-screen account-screen"><div class="staff-heading"><p>Account</p><h1>Profile & security</h1></div><article class="panel profile-card">${avatarMarkup(ui.session!, "staff-profile-avatar")}<div><h3>${escapeHtml(ui.session!.displayName)}</h3><small>${escapeHtml(ui.session!.email)}</small><b>Staff</b></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Security</p><h3>Change password</h3></div>${icon("ShieldCheck")}</div>${passwordForm("staff-password-form")}</article><button class="button secondary wide" data-action="logout">${icon("LogOut")} Sign out</button></div>`;
+  return `<div class="staff-screen account-screen"><div class="staff-heading"><p>Account</p><h1>Profile & security</h1></div><article class="panel profile-card">${avatarMarkup(ui.session!, "staff-profile-avatar")}<div><h3>${escapeHtml(ui.session!.displayName)}</h3><small>${escapeHtml(ui.session!.email)}</small><b>Staff</b></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Security</p><h3>Change password</h3></div>${icon("ShieldCheck")}</div>${passwordForm("staff-password-form")}</article>${installAppButton("Add POS to home screen")}<button class="button secondary wide" data-action="logout">${icon("LogOut")} Sign out</button></div>`;
 }
 
 function bindStaff(): void {
@@ -746,6 +786,7 @@ function bindProfileForm(): void {
 function bindCommon(): void {
   onAction("logout", logout);
   onAction("notifications", toggleNotifications);
+  onAction("install-app", installApp);
 }
 
 function onAction(name: string, handler: (button: HTMLButtonElement) => void | Promise<void>): void {
@@ -754,7 +795,7 @@ function onAction(name: string, handler: (button: HTMLButtonElement) => void | P
 
 function addToCart(productId: string): void {
   const product = ui.data.products.find((item) => item.id === productId);
-  if (!product || product.type !== "finished_product" || product.availableStock <= 0) return;
+  if (!product || product.type !== "finished_product" || (product.tracksInventory && product.availableStock <= 0)) return;
   const nextCart = ui.cart.map((entry) => ({ ...entry }));
   const nextItem = nextCart.find((entry) => entry.productId === productId);
   if (nextItem) nextItem.quantity += 1;
@@ -787,7 +828,9 @@ function cartIngredientsAvailable(cart: CartItem[]): boolean {
   const required = new Map<string, number>();
   for (const item of cart) {
     const product = ui.data.products.find((candidate) => candidate.id === item.productId);
-    if (!product || product.type !== "finished_product" || !product.recipe.length) return false;
+    if (!product || product.type !== "finished_product") return false;
+    if (!product.tracksInventory) continue;
+    if (!product.recipe.length) return false;
     for (const recipe of product.recipe) required.set(recipe.ingredientId, (required.get(recipe.ingredientId) ?? 0) + recipe.quantity * item.quantity);
   }
   return [...required].every(([ingredientId, quantity]) => {
@@ -825,7 +868,7 @@ function openSaleStatusDialog(id: string, status: SaleStatus): void {
   const sale = ui.data.sales.find((item) => item.id === id);
   if (!sale) return;
   const cancelling = status === "Cancelled";
-  confirmDelete(cancelling ? "Cancel and refund order?" : "Restore order?", cancelling ? `${sale.receipt} will be cancelled and its consumed raw materials returned to inventory.` : `${sale.receipt} will be completed again and its original recipe quantities deducted from inventory.`, async () => { await api.updateSaleStatus(id, status); await completeMutation(cancelling ? "Order refunded and raw material stock restored." : "Order restored and ingredients deducted."); });
+  confirmDelete(cancelling ? "Cancel and refund order?" : "Restore order?", cancelling ? `${sale.receipt} will be cancelled. Any tracked raw materials consumed by this sale will be returned to inventory.` : `${sale.receipt} will be completed again. Its original tracked ingredient quantities will be deducted.`, async () => { await api.updateSaleStatus(id, status); await completeMutation(cancelling ? "Order refunded; tracked stock was restored." : "Order restored; tracked ingredients were deducted."); });
 }
 
 function openReportExportDialog(): void {
@@ -990,22 +1033,35 @@ function openProductDialog(id?: string, typeOverride?: Product["type"]): void {
   const product = ui.data.products.find((item) => item.id === id);
   const type = typeOverride ?? product?.type ?? (ui.productTab === "raw_material" ? "raw_material" : "finished_product");
   const isFinished = type === "finished_product";
+  const selectedCategoryId = product?.categoryId ?? ui.data.categories[0]?.id ?? "";
+  const tracksInventory = !isFinished || (product?.type === "finished_product" ? product.tracksInventory : categoryTracksInventory(selectedCategoryId));
   const excludedIngredientId = product?.type === "raw_material" && isFinished ? product.id : undefined;
   const availableIngredients = rawMaterials().filter((material) => material.id !== excludedIngredientId);
   const recipeRows = product?.recipe ?? [];
   const recipeBody = recipeRows.map((recipe) => recipeIngredientRow(recipe.ingredientId, recipe.quantity, excludedIngredientId)).join("");
   const typeFields = isFinished
-    ? `<input name="unit" type="hidden" value="serving" /><input name="currentStock" type="hidden" value="0" /><input name="lowStockThreshold" type="hidden" value="0" /><label class="field"><span>Unit price (PHP)</span><input name="price" type="number" min="0" step="0.01" value="${product?.price ?? 0}" required /></label><fieldset class="recipe-editor wide"><legend>Recipe for one serving</legend><p>${availableIngredients.length ? "Quantities use each raw material's inventory unit. Leave empty to keep this item unavailable in POS." : "Add raw materials first to configure a recipe. You can still save the product details and photo now."}</p><div id="recipe-rows">${recipeBody}</div><button class="small-button" id="add-recipe-row" type="button" ${availableIngredients.length ? "" : "disabled"}>${icon("Plus")} Add ingredient</button></fieldset>`
+    ? `<input name="unit" type="hidden" value="serving" /><input name="currentStock" type="hidden" value="0" /><input name="lowStockThreshold" type="hidden" value="0" /><label class="field"><span>Unit price (PHP)</span><input name="price" type="number" min="0" step="0.01" value="${product?.price ?? 0}" required /></label><div class="inventory-scope-note wide" id="inventory-scope-note" ${tracksInventory ? "hidden" : ""}>${icon("Info")}<span><strong>Inventory tracking is disabled for this category.</strong><small>Staff can sell this item without a recipe and no raw materials will be deducted.</small></span></div><fieldset class="recipe-editor wide" id="recipe-editor-fieldset" ${tracksInventory ? "" : "hidden"}><legend>Recipe for one serving</legend><p>${availableIngredients.length ? "Quantities use each raw material's inventory unit. Leave empty to keep this item unavailable in POS." : "Add raw materials first to configure a recipe. You can still save the product details and photo now."}</p><div id="recipe-rows">${recipeBody}</div><button class="small-button" id="add-recipe-row" type="button" ${availableIngredients.length ? "" : "disabled"}>${icon("Plus")} Add ingredient</button></fieldset>`
     : `<label class="field"><span>Inventory unit</span><input name="unit" value="${escapeHtml(product?.unit ?? "mL")}" maxlength="12" placeholder="mL, g, pcs" required /></label>${product ? `<input name="currentStock" type="hidden" value="0" /><div class="field wide stock-readonly"><span>Current stock</span><strong>${number.format(product.currentStock)} ${escapeHtml(product.unit)}</strong><small>Use Add stock in Inventory to change the on-hand quantity.</small></div>` : `<label class="field"><span>Opening stock</span><input name="currentStock" type="number" min="0" step="0.001" value="0" required /></label>`}<label class="field"><span>Low-stock threshold</span><input name="lowStockThreshold" type="number" min="0" step="0.001" value="${product?.lowStockThreshold ?? 10}" required /></label><input name="price" type="hidden" value="0" />`;
   openDialog({
     title: product ? `Edit ${isFinished ? "finished product" : "raw material"}` : `Add ${isFinished ? "finished product" : "raw material"}`,
     description: isFinished ? "Set the sales price and ingredient quantity required for one serving." : "Stock is maintained in this unit and replenished through inventory movements.",
     wide: true,
-    body: `<div class="product-form-grid"><label class="image-upload"><input id="product-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" /><span id="image-preview">${product ? productVisual(product, true) : icon("PackagePlus")}</span><strong>${product?.imageUrl ? "Replace photo" : "Upload photo"}</strong><small>JPEG, PNG or WebP · maximum 5 MB</small></label><div class="form-grid"><input name="recipe" type="hidden" value="[]" /><label class="field"><span>Type</span><select id="product-type-selector" name="productType"><option value="finished_product" ${isFinished ? "selected" : ""}>Finished product / sales item</option><option value="raw_material" ${isFinished ? "" : "selected"}>Raw material / ingredient</option></select></label><label class="field"><span>Category</span><select name="categoryId">${ui.data.categories.map((category) => `<option value="${category.id}" ${category.id === product?.categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}</select></label><label class="field wide"><span>${isFinished ? "Finished product" : "Raw material"} name</span><input name="name" value="${escapeHtml(product?.name ?? "")}" maxlength="80" required /></label>${typeFields}${product?.imageUrl ? `<label class="check-field wide"><input name="removeImage" type="checkbox" value="true" /> Remove current photo</label>` : ""}</div></div>`,
+    body: `<div class="product-form-grid"><label class="image-upload"><input id="product-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" /><span id="image-preview">${product ? productVisual(product, true) : icon("PackagePlus")}</span><strong>${product?.imageUrl ? "Replace photo" : "Upload photo"}</strong><small>JPEG, PNG or WebP · maximum 5 MB</small></label><div class="form-grid"><input name="recipe" type="hidden" value="[]" /><label class="field"><span>Type</span><select id="product-type-selector" name="productType"><option value="finished_product" ${isFinished ? "selected" : ""}>Finished product / sales item</option><option value="raw_material" ${isFinished ? "" : "selected"}>Raw material / ingredient</option></select></label><label class="field"><span>Category</span><select id="product-category-selector" name="categoryId">${ui.data.categories.map((category) => `<option value="${category.id}" ${category.id === selectedCategoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}</select></label><label class="field wide"><span>${isFinished ? "Finished product" : "Raw material"} name</span><input name="name" value="${escapeHtml(product?.name ?? "")}" maxlength="80" required /></label>${typeFields}${product?.imageUrl ? `<label class="check-field wide"><input name="removeImage" type="checkbox" value="true" /> Remove current photo</label>` : ""}</div></div>`,
     submitLabel: product ? "Save changes" : `Add ${isFinished ? "sales item" : "raw material"}`,
     onOpen: () => {
       bindImagePreview();
       if (isFinished) bindRecipeEditor(excludedIngredientId);
+      const categorySelector = document.querySelector<HTMLSelectElement>("#product-category-selector");
+      const syncInventoryScope = (): void => {
+        if (!isFinished || !categorySelector) return;
+        const tracked = categoryTracksInventory(categorySelector.value);
+        const recipeEditor = document.querySelector<HTMLFieldSetElement>("#recipe-editor-fieldset");
+        const scopeNote = document.querySelector<HTMLElement>("#inventory-scope-note");
+        if (recipeEditor) recipeEditor.hidden = !tracked;
+        if (scopeNote) scopeNote.hidden = tracked;
+      };
+      categorySelector?.addEventListener("change", syncInventoryScope);
+      syncInventoryScope();
       document.querySelector<HTMLSelectElement>("#product-type-selector")?.addEventListener("change", (event) => {
         const nextType = (event.currentTarget as HTMLSelectElement).value as Product["type"];
         closeDialog();
@@ -1014,7 +1070,7 @@ function openProductDialog(id?: string, typeOverride?: Product["type"]): void {
     },
     onSubmit: async (form) => {
       const data = new FormData(form);
-      if (isFinished) data.set("recipe", JSON.stringify(readRecipeEditor()));
+      if (isFinished && categoryTracksInventory(String(data.get("categoryId") ?? ""))) data.set("recipe", JSON.stringify(readRecipeEditor()));
       ["currentStock", "lowStockThreshold", "price"].forEach((name) => data.set(name, String(Number(data.get(name)))));
       data.set("removeImage", String(data.get("removeImage") === "true"));
       if (product) await api.updateProduct(product.id, data); else await api.createProduct(data);
@@ -1100,5 +1156,19 @@ window.addEventListener("popstate", () => {
   if (ui.session?.role === "admin" && ui.route === "reports" && !ui.report) void loadReport();
   else render();
 });
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event as InstallPromptEvent;
+});
+
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  document.querySelectorAll(".install-app-button").forEach((button) => button.remove());
+});
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => { void navigator.serviceWorker.register("/sw.js"); });
+}
 
 void bootstrap();

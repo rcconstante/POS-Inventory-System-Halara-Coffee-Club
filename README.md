@@ -9,8 +9,8 @@ operations, and image storage.
 
 1. Open the Supabase SQL Editor for the project.
 2. Run the SQL files in `supabase/migrations` in numeric order. Existing
-   installations that already ran `001_initial.sql` only need to run
-   `002_product_recipes.sql`.
+   installations should apply every newer numbered migration they have not yet
+   run, through `005_inventory_tracking_scope.sql`.
 3. In **Authentication → Users**, create:
    - `r.constante.dev@gmail.com` with password `Admin@12345!`
    - `staff@halara.test` with password `Staff@12345!`
@@ -36,7 +36,24 @@ photos or guessed recipes. Administrators upload the real product photos and
 configure each item's actual recipe from **Products → Finished products** before
 the item becomes available for sale. Migration `004_allow_draft_finished_products.sql`
 allows those photos and menu details to be saved while the recipe is still being
-prepared; draft items remain disabled in POS.
+prepared. Migration `005_inventory_tracking_scope.sql` enforces the approved
+scope: coffee, sandwiches, and per-piece pastries require recipes; Pasta, Not
+Coffee, Tea Refreshers and Soda, and Add-ons can be sold without inventory
+deductions. The tracking decision is snapshotted on every sale item so cancelling
+or restoring an order remains safe even if the catalog changes later.
+
+### Test-only ingredients and recipes
+
+For a test or staging database only, run
+`supabase/testing/seed_inventory_recipes.sql` after migrations 001–005. It adds
+deterministic opening stock and recipes for the default coffee, sandwich, and
+pastry menu. The quantities are testing assumptions—not the client's production
+formulations—and rerunning the file resets the named test materials and recipes.
+It is intentionally outside `supabase/migrations` and must not be included in a
+production migration workflow.
+
+The seed uses the client-mentioned **Oatside Milk** name. Product image paths
+remain empty so the client can upload the actual menu photos in the Admin catalog.
 
 ## Local development
 
@@ -57,6 +74,22 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 
 Never place a Supabase service-role key in the frontend or in a `VITE_`
 environment variable.
+
+## Install on a phone home screen
+
+The Staff POS and Admin Inventory workspace are two roles inside the same web
+application. This project is an installable Progressive Web App, not a separate
+Android APK or iOS application.
+
+- On Android Chrome, sign in and use **Add POS to home screen**, or open the
+  browser menu and choose **Install app** / **Add to Home screen**.
+- On iPhone or iPad, open the deployed site in Safari, tap **Share**, then
+  **Add to Home Screen**.
+
+Installation requires an HTTPS deployment (localhost is allowed during
+development). The application shell can reopen from its cache, but authentication,
+sales, and inventory updates still require an internet connection to Supabase.
+The favicon and installed-app icons use the Halara Coffee Club main logo.
 
 ## Netlify deployment
 

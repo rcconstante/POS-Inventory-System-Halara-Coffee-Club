@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Halara Coffee Club POS & Inventory",
+  "short_name": "Halara POS",
+  "description": "Halara Coffee Club point-of-sale and inventory workspace.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fff8ef",
+  "theme_color": "#2f170d",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/halara-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/halara-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

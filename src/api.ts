@@ -8,7 +8,7 @@ export type ProductType = "raw_material" | "finished_product";
 export interface UserSession { id: string; email: string; displayName: string; role: UserRole; avatarUrl: string | null }
 export interface Category { id: string; name: string }
 export interface RecipeIngredient { ingredientId: string; quantity: number }
-export interface Product { id: string; name: string; categoryId: string; type: ProductType; unit: string; currentStock: number; availableStock: number; lowStockThreshold: number; price: number; imageUrl: string | null; recipe: RecipeIngredient[] }
+export interface Product { id: string; name: string; categoryId: string; type: ProductType; tracksInventory: boolean; unit: string; currentStock: number; availableStock: number; lowStockThreshold: number; price: number; imageUrl: string | null; recipe: RecipeIngredient[] }
 export interface StockMovement { id: string; productId: string; quantity: number; date: string; note: string }
 export interface SaleItem { productId: string; name: string; quantity: number; unitPrice: number }
 export interface Sale { id: string; receipt: string; date: string; payment: PaymentMethod; status: SaleStatus; total: number; items: SaleItem[]; createdAt: string }
@@ -30,7 +30,7 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 interface ProfileRow { id: string; display_name: string; role: UserRole; avatar_path: string | null }
-interface ProductRow { id: string; name: string; category_id: string; product_type: ProductType; unit: string; current_stock: number | string; low_stock_threshold: number | string; price_centavos: number | string; image_path: string | null }
+interface ProductRow { id: string; name: string; category_id: string; product_type: ProductType; tracks_inventory: boolean; unit: string; current_stock: number | string; low_stock_threshold: number | string; price_centavos: number | string; image_path: string | null }
 interface RecipeRow { finished_product_id: string; ingredient_id: string; quantity: number | string }
 interface MovementRow { id: string; product_id: string; quantity: number | string; movement_date: string; note: string }
 interface SaleRow { id: string; receipt: string; business_date: string; payment_method: PaymentMethod; status: SaleStatus; total_centavos: number | string; created_at: string }
@@ -84,7 +84,7 @@ async function removeStorageFile(bucket: "product-images" | "avatars", path: str
 async function loadAppData(): Promise<AppData> {
   const [categoryResult, productResult, recipeResult, movementResult, saleResult, itemResult] = await Promise.all([
     supabase.from("categories").select("id, name").order("name"),
-    supabase.from("products").select("id, name, category_id, product_type, unit, current_stock, low_stock_threshold, price_centavos, image_path").eq("active", true).order("name"),
+    supabase.from("products").select("id, name, category_id, product_type, tracks_inventory, unit, current_stock, low_stock_threshold, price_centavos, image_path").eq("active", true).order("name"),
     supabase.from("product_recipes").select("finished_product_id, ingredient_id, quantity").order("created_at"),
     supabase.from("inventory_movements").select("id, product_id, quantity, movement_date, note").order("movement_date", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("sales").select("id, receipt, business_date, payment_method, status, total_centavos, created_at").order("business_date", { ascending: false }).order("created_at", { ascending: false }),
@@ -103,6 +103,7 @@ async function loadAppData(): Promise<AppData> {
     name: row.name,
     categoryId: row.category_id,
     type: row.product_type,
+    tracksInventory: row.tracks_inventory,
     unit: row.unit,
     currentStock: Number(row.current_stock),
     availableStock: 0,
@@ -117,14 +118,16 @@ async function loadAppData(): Promise<AppData> {
   for (const product of products) {
     product.availableStock = product.type === "raw_material"
       ? Math.floor(product.currentStock)
-      : product.recipe.length
-        ? Math.max(0, Math.min(...product.recipe.map((recipe) => {
-            const ingredient = productsById.get(recipe.ingredientId);
-            return ingredient?.type === "raw_material" && recipe.quantity > 0
-              ? Math.floor(ingredient.currentStock / recipe.quantity)
-              : 0;
-          })))
-        : 0;
+      : !product.tracksInventory
+        ? Number.MAX_SAFE_INTEGER
+        : product.recipe.length
+          ? Math.max(0, Math.min(...product.recipe.map((recipe) => {
+              const ingredient = productsById.get(recipe.ingredientId);
+              return ingredient?.type === "raw_material" && recipe.quantity > 0
+                ? Math.floor(ingredient.currentStock / recipe.quantity)
+                : 0;
+            })))
+          : 0;
   }
   return {
     categories: ((categoryResult.data ?? []) as Category[]),

@@ -51,6 +51,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .access-heading h1 { margin-bottom: 6px; font-size: clamp(1.4rem, 2.5vw, 1.8rem); letter-spacing: -.04em; }
 .access-heading span { color: var(--muted); font-size: .85rem; }
 .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.access-card > .install-app-button { width: 100%; margin-top: 16px; }
 .role-card { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 16px; color: var(--ink); background: white; border: 1px solid var(--border); border-radius: 16px; text-align: center; transition: border-color .18s, transform .18s, box-shadow .18s; cursor: pointer; }
 .role-card:hover { border-color: #c79d81; box-shadow: 0 8px 20px rgba(139, 61, 16, 0.08); transform: translateY(-2px); }
 .role-card-img { width: 95px; height: 95px; object-fit: contain; margin-bottom: 10px; transition: transform .18s ease; }
@@ -328,6 +329,11 @@ span.settings-avatar { display: grid; place-items: center; }
 .recipe-editor { min-width: 0; margin: 2px 0 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
 .recipe-editor legend { padding: 0 5px; color: var(--ink); font-size: .78rem; font-weight: 800; }
 .recipe-editor > p { margin: 0 0 11px; color: var(--muted); font-size: .68rem; }
+.inventory-scope-note { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px; color: #6b4b17; background: #fff8e8; border: 1px solid #ead6a7; border-radius: 10px; }
+.inventory-scope-note svg { flex: 0 0 auto; width: 18px; margin-top: 1px; }
+.inventory-scope-note span { display: grid; gap: 3px; }
+.inventory-scope-note strong { font-size: .76rem; }
+.inventory-scope-note small { color: #806737; font-size: .68rem; line-height: 1.45; }
 #recipe-rows { display: grid; gap: 9px; margin-bottom: 10px; }
 .recipe-row { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(120px,.75fr) 34px; align-items: end; gap: 8px; padding-bottom: 9px; border-bottom: 1px solid #eee7e2; }
 .recipe-row:last-child { padding-bottom: 0; border-bottom: 0; }
@@ -491,6 +497,7 @@ span.settings-avatar { display: grid; place-items: center; }
 .mobile-inventory b { font-size: .66rem; }
 .account-screen { display: grid; gap: 13px; }
 .account-screen .staff-heading { margin-bottom: 0; }
+.account-screen > .install-app-button { width: 100%; }
 
 @media (max-width: 1100px) {
   :root { --sidebar: 220px; }
