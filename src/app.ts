@@ -297,14 +297,56 @@ function render(): void {
 
 function renderAccess(): void {
   if (!ui.roleChoice) {
+  } finally {
+    ui.loading = false;
+    render();
+  }
+}
+
+async function refreshAll(shouldRender = true): Promise<void> {
+  const [data, notificationData] = await Promise.all([api.appData(), api.notifications()]);
+  ui.data = data;
+  ui.notifications = notificationData.notifications;
+  ui.unread = notificationData.unread;
+  if (shouldRender) render();
+}
+
+function startNotificationPolling(): void {
+  window.clearInterval(notificationTimer);
+  notificationTimer = window.setInterval(async () => {
+    if (!ui.session || document.hidden) return;
+    try {
+      const result = await api.notifications();
+      ui.notifications = result.notifications;
+      ui.unread = result.unread;
+      const badge = document.querySelector<HTMLElement>("[data-notification-count]");
+      if (badge) badge.textContent = result.unread ? String(result.unread) : "";
+    } catch { /* The next refresh retries quietly. */ }
+  }, 30_000);
+}
+
+function renderLoading(message: string): void {
+  app.innerHTML = `<main class="loading-screen"><img src="${logoUrl}" alt="Company logo" /><span>${icon("LoaderCircle", "spin")}</span><p>${escapeHtml(message)}</p></main>`;
+  hydrate(app);
+}
+
+function render(): void {
+  document.body.className = ui.session ? (ui.session.role === "staff" ? "staff-page" : "app-page") : "login-page";
+  if (!ui.session) renderAccess();
+  else if (ui.session.role === "admin") renderAdmin();
+  else renderStaff();
+}
+
+function renderAccess(): void {
+  if (!ui.roleChoice) {
     app.innerHTML = `
       <main class="access-page" id="main-content">
         <section class="access-card">
           <img class="access-logo" src="${logoUrl}" alt="Company logo" />
           <div class="access-heading"><p>Secure cloud workspace</p><h1>Choose how you want to sign in</h1><span>Use the dashboard to manage the business or open the tablet POS.</span></div>
           <div class="role-grid">
-            ${roleCard("admin", "ShieldCheck", "Admin", "Products, inventory, sales, reports and settings")}
-            ${roleCard("staff", "UserRound", "Staff", "Orders, payments, receipts and stock visibility")}
+            ${roleCard("admin", adminRoleUrl, "Admin", "Products, inventory, sales, reports and settings")}
+            ${roleCard("staff", staffRoleUrl, "Staff", "Orders, payments, receipts and stock visibility")}
           </div>
         </section>
       </main>`;
@@ -316,6 +358,7 @@ function renderAccess(): void {
   }
 
   const isAdmin = ui.roleChoice === "admin";
+  const roleImg = isAdmin ? adminRoleUrl : staffRoleUrl;
   const demoEmail = isAdmin ? "admin@halara.test" : "staff@halara.test";
   const demoPassword = isAdmin ? "Admin@12345!" : "Staff@12345!";
   app.innerHTML = `
@@ -324,7 +367,11 @@ function renderAccess(): void {
         <div class="login-content">
           <button class="back-link" id="back-role" type="button">${icon("ArrowLeft")} Choose another role</button>
           <img class="login-logo" src="${logoUrl}" alt="Company logo" />
-          <div class="login-heading"><h1>${isAdmin ? "Admin" : "Staff"} sign in</h1><p>${isAdmin ? "Manage operations and business performance." : "Open the point-of-sale workspace."}</p></div>
+          <div class="login-heading">
+            <img class="login-role-badge" src="${roleImg}" alt="${isAdmin ? "Admin" : "Staff"}" />
+            <h1>${isAdmin ? "Admin" : "Staff"} sign in</h1>
+            <p>${isAdmin ? "Manage operations and business performance." : "Open the point-of-sale workspace."}</p>
+          </div>
           <form id="login-form" class="login-form" novalidate>
             <label class="field"><span>Email address</span><input name="email" type="email" autocomplete="email" placeholder="name@example.com" required /><small class="field-error" data-error="email"></small></label>
             <label class="field"><span>Password</span><div class="password-input"><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required /><button type="button" data-password-toggle="login-password" aria-label="Show password">${icon("Eye")}</button></div><small class="field-error" data-error="password"></small></label>
@@ -332,7 +379,7 @@ function renderAccess(): void {
             <button class="button primary wide" type="submit">Sign in</button>
           </form>
           <aside class="demo-access" aria-label="Thesis demo credentials">
-            <div><span>${icon("ShieldCheck")}</span><strong>Thesis demo access</strong></div>
+            <div><span class="demo-role-icon"><img src="${roleImg}" alt="${isAdmin ? "Admin" : "Staff"}" /></span><strong>Thesis demo access</strong></div>
             <button type="button" id="fill-demo" data-email="${demoEmail}" data-password="${demoPassword}">
               <span><small>Email</small><b>${demoEmail}</b></span><span><small>Default password</small><b>${demoPassword}</b></span><em>Use credentials</em>
             </button>
@@ -346,8 +393,8 @@ function renderAccess(): void {
   bindLogin();
 }
 
-function roleCard(role: UserRole, iconName: string, title: string, copy: string): string {
-  return `<button class="role-card" type="button" data-role="${role}"><span>${icon(iconName)}</span><div><strong>${title}</strong><small>${copy}</small></div><i>${icon("ArrowLeft")}</i></button>`;
+function roleCard(role: UserRole, imageUrl: string, title: string, copy: string): string {
+  return `<button class="role-card" type="button" data-role="${role}"><span class="role-card-avatar"><img src="${imageUrl}" alt="${title}" /></span><div><strong>${title}</strong><small>${copy}</small></div><i>${icon("ArrowLeft")}</i></button>`;
 }
 
 function bindLogin(): void {
