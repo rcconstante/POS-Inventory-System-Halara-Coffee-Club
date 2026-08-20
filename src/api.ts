@@ -3,10 +3,12 @@ import { createClient, type User } from "@supabase/supabase-js";
 export type UserRole = "admin" | "staff";
 export type PaymentMethod = "Cash" | "GCash" | "Maya";
 export type SaleStatus = "Completed" | "Cancelled";
+export type ProductType = "raw_material" | "finished_product";
 
 export interface UserSession { id: string; email: string; displayName: string; role: UserRole; avatarUrl: string | null }
 export interface Category { id: string; name: string }
-export interface Product { id: string; name: string; categoryId: string; unit: string; currentStock: number; lowStockThreshold: number; price: number; imageUrl: string | null }
+export interface RecipeIngredient { ingredientId: string; quantity: number }
+export interface Product { id: string; name: string; categoryId: string; type: ProductType; unit: string; currentStock: number; availableStock: number; lowStockThreshold: number; price: number; imageUrl: string | null; recipe: RecipeIngredient[] }
 export interface StockMovement { id: string; productId: string; quantity: number; date: string; note: string }
 export interface SaleItem { productId: string; name: string; quantity: number; unitPrice: number }
 export interface Sale { id: string; receipt: string; date: string; payment: PaymentMethod; status: SaleStatus; total: number; items: SaleItem[]; createdAt: string }
@@ -28,7 +30,8 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 interface ProfileRow { id: string; display_name: string; role: UserRole; avatar_path: string | null }
-interface ProductRow { id: string; name: string; category_id: string; unit: string; current_stock: number | string; low_stock_threshold: number | string; price_centavos: number | string; image_path: string | null }
+interface ProductRow { id: string; name: string; category_id: string; product_type: ProductType; unit: string; current_stock: number | string; low_stock_threshold: number | string; price_centavos: number | string; image_path: string | null }
+interface RecipeRow { finished_product_id: string; ingredient_id: string; quantity: number | string }
 interface MovementRow { id: string; product_id: string; quantity: number | string; movement_date: string; note: string }
 interface SaleRow { id: string; receipt: string; business_date: string; payment_method: PaymentMethod; status: SaleStatus; total_centavos: number | string; created_at: string }
 interface SaleItemRow { sale_id: string; product_id: string; product_name: string; quantity: number; unit_price_centavos: number | string; line_total_centavos: number | string }
@@ -79,23 +82,53 @@ async function removeStorageFile(bucket: "product-images" | "avatars", path: str
 }
 
 async function loadAppData(): Promise<AppData> {
-  const [categoryResult, productResult, movementResult, saleResult, itemResult] = await Promise.all([
+  const [categoryResult, productResult, recipeResult, movementResult, saleResult, itemResult] = await Promise.all([
     supabase.from("categories").select("id, name").order("name"),
-    supabase.from("products").select("id, name, category_id, unit, current_stock, low_stock_threshold, price_centavos, image_path").eq("active", true).order("name"),
+    supabase.from("products").select("id, name, category_id, product_type, unit, current_stock, low_stock_threshold, price_centavos, image_path").eq("active", true).order("name"),
+    supabase.from("product_recipes").select("finished_product_id, ingredient_id, quantity").order("created_at"),
     supabase.from("inventory_movements").select("id, product_id, quantity, movement_date, note").order("movement_date", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("sales").select("id, receipt, business_date, payment_method, status, total_centavos, created_at").order("business_date", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("sale_items").select("sale_id, product_id, product_name, quantity, unit_price_centavos, line_total_centavos"),
   ]);
-  for (const result of [categoryResult, productResult, movementResult, saleResult, itemResult]) if (result.error) fail(result.error);
+  for (const result of [categoryResult, productResult, recipeResult, movementResult, saleResult, itemResult]) if (result.error) fail(result.error);
   const itemRows = (itemResult.data ?? []) as SaleItemRow[];
   const itemsBySale = new Map<string, SaleItem[]>();
   for (const row of itemRows) {
     const item = { productId: row.product_id, name: row.product_name, quantity: row.quantity, unitPrice: Number(row.unit_price_centavos) / 100 };
     itemsBySale.set(row.sale_id, [...(itemsBySale.get(row.sale_id) ?? []), item]);
   }
+  const recipeRows = (recipeResult.data ?? []) as RecipeRow[];
+  const products: Product[] = ((productResult.data ?? []) as ProductRow[]).map((row) => ({
+    id: row.id,
+    name: row.name,
+    categoryId: row.category_id,
+    type: row.product_type,
+    unit: row.unit,
+    currentStock: Number(row.current_stock),
+    availableStock: 0,
+    lowStockThreshold: Number(row.low_stock_threshold),
+    price: Number(row.price_centavos) / 100,
+    imageUrl: storageUrl("product-images", row.image_path),
+    recipe: recipeRows
+      .filter((recipe) => recipe.finished_product_id === row.id)
+      .map((recipe) => ({ ingredientId: recipe.ingredient_id, quantity: Number(recipe.quantity) })),
+  }));
+  const productsById = new Map(products.map((product) => [product.id, product]));
+  for (const product of products) {
+    product.availableStock = product.type === "raw_material"
+      ? Math.floor(product.currentStock)
+      : product.recipe.length
+        ? Math.max(0, Math.min(...product.recipe.map((recipe) => {
+            const ingredient = productsById.get(recipe.ingredientId);
+            return ingredient?.type === "raw_material" && recipe.quantity > 0
+              ? Math.floor(ingredient.currentStock / recipe.quantity)
+              : 0;
+          })))
+        : 0;
+  }
   return {
     categories: ((categoryResult.data ?? []) as Category[]),
-    products: ((productResult.data ?? []) as ProductRow[]).map((row) => ({ id: row.id, name: row.name, categoryId: row.category_id, unit: row.unit, currentStock: Number(row.current_stock), lowStockThreshold: Number(row.low_stock_threshold), price: Number(row.price_centavos) / 100, imageUrl: storageUrl("product-images", row.image_path) })),
+    products,
     stockMovements: ((movementResult.data ?? []) as MovementRow[]).map((row) => ({ id: row.id, productId: row.product_id, quantity: Number(row.quantity), date: row.movement_date, note: row.note })),
     sales: ((saleResult.data ?? []) as SaleRow[]).map((row) => ({ id: row.id, receipt: row.receipt, date: row.business_date, payment: row.payment_method, status: row.status, total: Number(row.total_centavos) / 100, items: itemsBySale.get(row.id) ?? [], createdAt: row.created_at })),
   };
@@ -107,6 +140,63 @@ async function uploadProductImage(productId: string, file: File): Promise<string
   const { error } = await supabase.storage.from("product-images").upload(path, file, { cacheControl: "31536000", upsert: false, contentType: file.type });
   if (error) fail(error);
   return path;
+}
+
+function productInput(form: FormData): {
+  name: string;
+  categoryId: string;
+  type: ProductType;
+  unit: string;
+  lowStockThreshold: number;
+  priceCentavos: number;
+  initialStock: number;
+  recipe: RecipeIngredient[];
+} {
+  const type = String(form.get("productType")) as ProductType;
+  if (type !== "raw_material" && type !== "finished_product") throw new Error("Select a valid product type.");
+  let recipe: RecipeIngredient[] = [];
+  try {
+    const value: unknown = JSON.parse(String(form.get("recipe") ?? "[]"));
+    if (!Array.isArray(value)) throw new Error();
+    recipe = value.map((item) => {
+      if (!item || typeof item !== "object") throw new Error();
+      const ingredientId = String((item as { ingredientId?: unknown }).ingredientId ?? "");
+      const quantity = Number((item as { quantity?: unknown }).quantity);
+      if (!ingredientId || !Number.isFinite(quantity) || quantity <= 0) throw new Error();
+      return { ingredientId, quantity };
+    });
+  } catch {
+    throw new Error("Every recipe ingredient needs a valid positive quantity.");
+  }
+  if (new Set(recipe.map((item) => item.ingredientId)).size !== recipe.length) throw new Error("Each ingredient can appear only once in a recipe.");
+  return {
+    name: String(form.get("name") ?? "").trim(),
+    categoryId: String(form.get("categoryId") ?? ""),
+    type,
+    unit: String(form.get("unit") ?? "").trim(),
+    lowStockThreshold: Number(form.get("lowStockThreshold") ?? 0),
+    priceCentavos: Math.round(Number(form.get("price") ?? 0) * 100),
+    initialStock: Number(form.get("currentStock") ?? 0),
+    recipe,
+  };
+}
+
+async function saveCatalogProduct(id: string, imagePath: string | null, form: FormData): Promise<string> {
+  const input = productInput(form);
+  const { data, error } = await supabase.rpc("save_catalog_product", {
+    p_id: id,
+    p_name: input.name,
+    p_category_id: input.categoryId,
+    p_product_type: input.type,
+    p_unit: input.unit,
+    p_low_stock_threshold: input.lowStockThreshold,
+    p_price_centavos: input.priceCentavos,
+    p_image_path: imagePath,
+    p_recipe: input.recipe.map((item) => ({ ingredient_id: item.ingredientId, quantity: item.quantity })),
+    p_initial_stock: input.initialStock,
+  });
+  if (error) fail(error);
+  return String(data);
 }
 
 async function buildReport(from: string, to: string): Promise<ReportSummary> {
@@ -232,14 +322,15 @@ export const api = {
   },
   async deleteCategory(id: string): Promise<void> { const { error } = await supabase.from("categories").delete().eq("id", id); if (error) fail(error); },
   async createProduct(form: FormData): Promise<Product> {
-    const row = { name: String(form.get("name") ?? "").trim(), category_id: String(form.get("categoryId") ?? ""), unit: String(form.get("unit") ?? "").trim(), current_stock: Number(form.get("currentStock")), low_stock_threshold: Number(form.get("lowStockThreshold")), price_centavos: Math.round(Number(form.get("price")) * 100) };
-    const { data, error } = await supabase.from("products").insert(row).select("id").single();
-    if (error || !data) fail(error);
-    const id = String(data.id);
+    const id = crypto.randomUUID();
     const file = form.get("image");
-    if (file instanceof File && file.size) {
-      try { const imagePath = await uploadProductImage(id, file); const result = await supabase.from("products").update({ image_path: imagePath }).eq("id", id); if (result.error) fail(result.error); }
-      catch (uploadError) { await supabase.from("products").delete().eq("id", id); throw uploadError; }
+    let imagePath: string | null = null;
+    try {
+      if (file instanceof File && file.size) imagePath = await uploadProductImage(id, file);
+      await saveCatalogProduct(id, imagePath, form);
+    } catch (error) {
+      if (imagePath) await removeStorageFile("product-images", imagePath).catch(() => undefined);
+      throw error;
     }
     const products = (await loadAppData()).products; return products.find((product) => product.id === id)!;
   },
@@ -249,10 +340,18 @@ export const api = {
     const previousImagePath = (existing as { image_path: string | null }).image_path;
     let imagePath = previousImagePath;
     const file = form.get("image");
-    if (file instanceof File && file.size) imagePath = await uploadProductImage(id, file);
+    let uploadedImagePath: string | null = null;
+    if (file instanceof File && file.size) {
+      uploadedImagePath = await uploadProductImage(id, file);
+      imagePath = uploadedImagePath;
+    }
     else if (form.get("removeImage") === "true") imagePath = null;
-    const row = { name: String(form.get("name") ?? "").trim(), category_id: String(form.get("categoryId") ?? ""), unit: String(form.get("unit") ?? "").trim(), current_stock: Number(form.get("currentStock")), low_stock_threshold: Number(form.get("lowStockThreshold")), price_centavos: Math.round(Number(form.get("price")) * 100), image_path: imagePath, updated_at: new Date().toISOString() };
-    const { error } = await supabase.from("products").update(row).eq("id", id); if (error) fail(error);
+    try {
+      await saveCatalogProduct(id, imagePath, form);
+    } catch (error) {
+      if (uploadedImagePath) await removeStorageFile("product-images", uploadedImagePath);
+      throw error;
+    }
     if (previousImagePath && previousImagePath !== imagePath) await removeStorageFile("product-images", previousImagePath);
     return (await loadAppData()).products.find((product) => product.id === id)!;
   },

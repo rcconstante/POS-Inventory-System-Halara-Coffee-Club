@@ -8,7 +8,9 @@ operations, and image storage.
 ## Supabase setup
 
 1. Open the Supabase SQL Editor for the project.
-2. Run `supabase/migrations/001_initial.sql` once.
+2. Run the SQL files in `supabase/migrations` in numeric order. Existing
+   installations that already ran `001_initial.sql` only need to run
+   `002_product_recipes.sql`.
 3. In **Authentication → Users**, create:
    - `r.constante.dev@gmail.com` with password `Admin@12345!`
    - `staff@halara.test` with password `Staff@12345!`
@@ -16,9 +18,25 @@ operations, and image storage.
 
 The first SQL file creates the application tables, indexes, storage buckets,
 row-level security policies, notification triggers, and transactional stock and
-sales functions. The second assigns the Admin and Staff roles to the two thesis
-accounts. Change the default passwords from the application after confirming
-that both accounts can sign in.
+sales functions. Migration `002_product_recipes.sql` separates raw materials
+from finished POS items, adds per-serving recipes, and deducts all recipe
+ingredients atomically when a sale is completed. `setup-users.sql` assigns the
+Admin and Staff roles to the two thesis accounts. Change the default passwords
+from the application after confirming that both accounts can sign in.
+
+After applying migration 002, review the Admin **Products** workspace. Existing
+priced products are classified as finished products and must be given a recipe
+before staff can sell them. Existing zero-price products are classified as raw
+materials. Stock raw materials in their recipe unit (for example, `mL`, `g`, or
+`pcs`) so recipe quantities and on-hand quantities use the same measurement.
+
+Migration `003_default_menu.sql` adds the client-provided food, pastry, drink,
+and add-on menu with the listed prices. It intentionally does not add stock
+photos or guessed recipes. Administrators upload the real product photos and
+configure each item's actual recipe from **Products → Finished products** before
+the item becomes available for sale. Migration `004_allow_draft_finished_products.sql`
+allows those photos and menu details to be saved while the recipe is still being
+prepared; draft items remain disabled in POS.
 
 ## Local development
 

@@ -25,7 +25,7 @@ const icons: Icons = {
 };
 
 type AdminRoute = "dashboard" | "sales" | "products" | "inventory" | "reports" | "settings";
-type ProductTab = "products" | "categories";
+type ProductTab = "finished_product" | "raw_material" | "categories";
 type StaffView = "dashboard" | "products" | "cart" | "payment" | "success" | "orders" | "inventory" | "account";
 type ToastKind = "success" | "error" | "info";
 
@@ -56,6 +56,7 @@ interface UiState {
   reportLoading: boolean;
   productSearch: string;
   posSearch: string;
+  posCategory: string;
 }
 
 const emptyData = (): AppData => ({ categories: [], products: [], stockMovements: [], sales: [] });
@@ -76,7 +77,7 @@ const ui: UiState = {
   notifications: [],
   unread: 0,
   route: "dashboard",
-  productTab: "products",
+  productTab: "finished_product",
   staffView: "dashboard",
   navOpen: false,
   accountOpen: false,
@@ -90,6 +91,7 @@ const ui: UiState = {
   reportLoading: false,
   productSearch: "",
   posSearch: "",
+  posCategory: "all",
 };
 
 const app = required<HTMLDivElement>("#app");
@@ -150,6 +152,14 @@ function avatarMarkup(session: UserSession, className = "avatar-circle"): string
     : `<span class="${className}">${escapeHtml(session.displayName.charAt(0).toUpperCase())}</span>`;
 }
 
+function rawMaterials(): Product[] {
+  return ui.data.products.filter((product) => product.type === "raw_material");
+}
+
+function finishedProducts(): Product[] {
+  return ui.data.products.filter((product) => product.type === "finished_product");
+}
+
 function locationParts(): string[] {
   return window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 }
@@ -191,11 +201,17 @@ function restorePosState(): void {
       selectedPayment?: PaymentMethod | null;
       completedSaleId?: string | null;
     } | null;
-    ui.cart = (saved?.cart ?? []).flatMap((item) => {
+    const remaining = new Map(rawMaterials().map((material) => [material.id, material.currentStock]));
+    ui.cart = [];
+    for (const item of saved?.cart ?? []) {
       const product = ui.data.products.find((candidate) => candidate.id === item.productId);
-      if (!product || !Number.isInteger(item.quantity) || item.quantity <= 0 || product.currentStock <= 0) return [];
-      return [{ productId: item.productId, quantity: Math.min(item.quantity, Math.floor(product.currentStock)) }];
-    });
+      if (!product || product.type !== "finished_product" || !product.recipe.length || !Number.isInteger(item.quantity) || item.quantity <= 0) continue;
+      const available = Math.max(0, Math.min(...product.recipe.map((recipe) => Math.floor((remaining.get(recipe.ingredientId) ?? 0) / recipe.quantity))));
+      const quantity = Math.min(item.quantity, available);
+      if (quantity <= 0) continue;
+      ui.cart.push({ productId: item.productId, quantity });
+      for (const recipe of product.recipe) remaining.set(recipe.ingredientId, (remaining.get(recipe.ingredientId) ?? 0) - recipe.quantity * quantity);
+    }
     ui.selectedPayment = saved?.selectedPayment === "Cash" || saved?.selectedPayment === "GCash" || saved?.selectedPayment === "Maya" ? saved.selectedPayment : null;
     ui.completedSale = saved?.completedSaleId ? ui.data.sales.find((sale) => sale.id === saved.completedSaleId) ?? null : null;
   } catch {
@@ -419,7 +435,7 @@ function metric(label: string, value: string, note: string, iconName: string, to
 function renderDashboard(): string {
   const completed = ui.data.sales.filter((sale) => sale.status === "Completed" && sale.date >= ui.reportRange.from && sale.date <= ui.reportRange.to);
   const total = completed.reduce((sum, sale) => sum + saleTotal(sale), 0);
-  const alerts = ui.data.products.filter((product) => stockStatus(product) !== "Available");
+  const alerts = rawMaterials().filter((product) => stockStatus(product) !== "Available");
   return `<section class="page-section">
     ${pageHeading("Live operations", "Business at a glance", "Real-time data from Supabase")}
     <div class="metric-grid">${metric("Total sales", money.format(total), "Selected 7-day period", "BarChart3", "accent")}${metric("Transactions", String(completed.length), "Completed orders", "Receipt")}${metric("Stock alerts", String(alerts.length), alerts.length ? "Needs attention" : "Inventory healthy", "CircleAlert", alerts.length ? "warning" : "success")}${metric("Products", String(ui.data.products.length), "Active catalog items", "Box")}</div>
@@ -443,10 +459,14 @@ function salesTable(sales: Sale[], compact = false): string {
 }
 
 function renderProductsManagement(): string {
-  const tabs = `<div class="tabs"><button data-product-tab="products" class="${ui.productTab === "products" ? "active" : ""}">Product list</button><button data-product-tab="categories" class="${ui.productTab === "categories" ? "active" : ""}">Categories</button></div>`;
+  const tabs = `<div class="tabs"><button data-product-tab="finished_product" class="${ui.productTab === "finished_product" ? "active" : ""}">Finished products</button><button data-product-tab="raw_material" class="${ui.productTab === "raw_material" ? "active" : ""}">Raw materials</button><button data-product-tab="categories" class="${ui.productTab === "categories" ? "active" : ""}">Categories</button></div>`;
   if (ui.productTab === "categories") return `<section class="page-section">${pageHeading("Catalog", "Categories", "Organize products for the Admin and Staff workspaces", `<button class="button primary" data-action="add-category">${icon("Plus")} Add category</button>`)}${tabs}<div class="category-grid">${ui.data.categories.length ? ui.data.categories.map(categoryCard).join("") : `<div class="category-empty">${emptyState("Tag", "No categories yet", "Create your first category to start organizing products.")}</div>`}</div></section>`;
-  const products = ui.data.products.filter((product) => product.name.toLowerCase().includes(ui.productSearch.toLowerCase()));
-  return `<section class="page-section">${pageHeading("Catalog", "Products", "Manage prices, stock thresholds, and product photos", `<button class="button primary" data-action="add-product">${icon("Plus")} Add product</button>`)}${tabs}<div class="filter-bar"><label class="search-box">${icon("Search")}<input id="product-search" value="${escapeHtml(ui.productSearch)}" placeholder="Search products" /></label></div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Unit price</th><th>Status</th><th>Actions</th></tr></thead><tbody>${products.length ? products.map((product) => `<tr><td data-label="Product"><div class="product-cell">${productVisual(product)}<strong>${escapeHtml(product.name)}</strong></div></td><td data-label="Category">${escapeHtml(categoryName(product.categoryId))}</td><td data-label="Stock">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Unit price">${money.format(product.price)}</td><td data-label="Status">${statusPill(stockStatus(product))}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-product" data-id="${product.id}">Edit</button><button class="small-button danger" data-action="delete-product" data-id="${product.id}">${icon("Trash2")} Delete</button></div></td></tr>`).join("") : `<tr><td colspan="6">${emptyState("Box", "No products", "Add your first product or change the search.")}</td></tr>`}</tbody></table></div></article></section>`;
+  const isFinished = ui.productTab === "finished_product";
+  const products = ui.data.products.filter((product) => product.type === ui.productTab && product.name.toLowerCase().includes(ui.productSearch.toLowerCase()));
+  const title = isFinished ? "Finished products" : "Raw materials";
+  const description = isFinished ? "Manage POS sales items and the ingredient recipe for each serving" : "Manage stocked ingredients, units, and low-stock thresholds";
+  const recipeSummary = (product: Product): string => product.recipe.length ? product.recipe.map((item) => { const ingredient = ui.data.products.find((candidate) => candidate.id === item.ingredientId); return `${number.format(item.quantity)} ${ingredient?.unit ?? ""} ${ingredient?.name ?? "Missing ingredient"}`; }).join(", ") : "Recipe not configured";
+  return `<section class="page-section">${pageHeading("Catalog", title, description, `<button class="button primary" data-action="add-product">${icon("Plus")} Add ${isFinished ? "sales item" : "raw material"}</button>`)}${tabs}<div class="filter-bar"><label class="search-box">${icon("Search")}<input id="product-search" value="${escapeHtml(ui.productSearch)}" placeholder="Search ${isFinished ? "sales items" : "raw materials"}" /></label></div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th>${isFinished ? "<th>Recipe per serving</th><th>Can make</th><th>Unit price</th>" : "<th>On hand</th><th>Low-stock level</th><th>Status</th>"}<th>Actions</th></tr></thead><tbody>${products.length ? products.map((product) => `<tr><td data-label="Product"><div class="product-cell">${productVisual(product)}<strong>${escapeHtml(product.name)}</strong></div></td><td data-label="Category">${escapeHtml(categoryName(product.categoryId))}</td>${isFinished ? `<td data-label="Recipe">${escapeHtml(recipeSummary(product))}</td><td data-label="Can make">${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"}</td><td data-label="Unit price">${money.format(product.price)}</td>` : `<td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Low-stock level">${number.format(product.lowStockThreshold)} ${escapeHtml(product.unit)}</td><td data-label="Status">${statusPill(stockStatus(product))}</td>`}<td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-product" data-id="${product.id}">Edit</button><button class="small-button danger" data-action="delete-product" data-id="${product.id}">${icon("Trash2")} Delete</button></div></td></tr>`).join("") : `<tr><td colspan="6">${emptyState(isFinished ? "Coffee" : "Boxes", `No ${title.toLowerCase()}`, `Add the first ${isFinished ? "finished product and its recipe" : "ingredient or packaging material"}.`)}</td></tr>`}</tbody></table></div></article></section>`;
 }
 
 function categoryCard(category: Category): string {
@@ -455,7 +475,9 @@ function categoryCard(category: Category): string {
 }
 
 function renderInventory(): string {
-  return `<section class="page-section">${pageHeading("Stock control", "Inventory movements", "Record supplier deliveries and maintain accurate on-hand quantities", `<button class="button primary" data-action="add-stock" ${ui.data.products.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Product</th><th>Date</th><th>Quantity added</th><th>Current stock</th><th>Note</th><th>Actions</th></tr></thead><tbody>${ui.data.stockMovements.length ? ui.data.stockMovements.map((movement) => { const product = ui.data.products.find((item) => item.id === movement.productId); return `<tr><td data-label="Product"><strong>${escapeHtml(product?.name ?? "Deleted product")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Current stock">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="6">${emptyState("Truck", "No stock movements", "Add a product and record the first delivery.")}</td></tr>`}</tbody></table></div></article></section>`;
+  const materials = rawMaterials();
+  const movements = ui.data.stockMovements.filter((movement) => materials.some((product) => product.id === movement.productId));
+  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Record supplier deliveries; completed sales deduct recipe ingredients automatically", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Current stock</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Current stock">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="6">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article></section>`;
 }
 
 function renderReports(): string {
@@ -606,13 +628,16 @@ function renderStaffView(): string {
 
 function renderStaffDashboard(): string {
   const todaySales = ui.data.sales.filter((sale) => sale.date === manilaDate() && sale.status === "Completed");
-  const alerts = ui.data.products.filter((product) => stockStatus(product) !== "Available");
+  const alerts = rawMaterials().filter((product) => stockStatus(product) !== "Available");
   return `<div class="staff-screen"><div class="staff-heading"><p>${formatDate(manilaDate())}</p><h1>Today’s overview</h1></div><div class="staff-metrics">${metric("Sales today", money.format(todaySales.reduce((sum, sale) => sum + saleTotal(sale), 0)), "Completed revenue", "BarChart3")}${metric("Transactions", String(todaySales.length), "Completed today", "Receipt")}${metric("Low stock", String(alerts.length), "Items need attention", "CircleAlert", alerts.length ? "warning" : "success")}</div><h2 class="section-title">Quick actions</h2><div class="staff-quick"><button data-staff-view="products">${icon("Plus")}<strong>New order</strong></button><button data-staff-view="orders">${icon("Receipt")}<strong>Orders</strong></button><button data-staff-view="inventory">${icon("Box")}<strong>Inventory</strong></button></div>${ui.data.products.length ? "" : `<div class="staff-empty-note">${icon("CircleAlert")}<div><strong>The catalog is empty</strong><p>An administrator must create categories and products before orders can be taken.</p></div></div>`}</div>`;
 }
 
 function renderStaffProducts(): string {
-  const products = ui.data.products.filter((product) => product.name.toLowerCase().includes(ui.posSearch.toLowerCase()));
-  return `<div class="staff-screen products-screen"><div class="staff-heading row"><div><p>Point of sale</p><h1>New order</h1></div><button class="cart-button" data-staff-view="cart">${icon("ShoppingCart")}<span>${cartCount()}</span></button></div><label class="search-box large">${icon("Search")}<input id="pos-search" value="${escapeHtml(ui.posSearch)}" placeholder="Search products" /></label><div class="staff-product-grid">${products.length ? products.map((product) => `<article class="staff-product ${product.currentStock <= 0 ? "sold-out" : ""}">${productVisual(product, true)}<div><h2>${escapeHtml(product.name)}</h2><p>${escapeHtml(categoryName(product.categoryId))}</p><strong>${money.format(product.price)}</strong><small>${product.currentStock <= 0 ? "Sold out" : `${number.format(product.currentStock)} available`}</small></div><button data-action="add-cart" data-id="${product.id}" ${product.currentStock <= 0 ? "disabled" : ""} aria-label="Add ${escapeHtml(product.name)}">${icon("Plus")}</button></article>`).join("") : emptyState("Coffee", "No products found", "An administrator can add products from the dashboard.")}</div></div>`;
+  const allProducts = finishedProducts();
+  const categories = ui.data.categories.filter((category) => allProducts.some((product) => product.categoryId === category.id));
+  const products = allProducts.filter((product) => (ui.posCategory === "all" || product.categoryId === ui.posCategory) && product.name.toLowerCase().includes(ui.posSearch.toLowerCase()));
+  const categoryFilters = `<div class="pos-category-filter" role="group" aria-label="Filter menu by category"><button data-pos-category="all" aria-pressed="${ui.posCategory === "all"}" class="${ui.posCategory === "all" ? "active" : ""}">All</button>${categories.map((category) => `<button data-pos-category="${category.id}" aria-pressed="${ui.posCategory === category.id}" class="${ui.posCategory === category.id ? "active" : ""}">${escapeHtml(category.name)}</button>`).join("")}</div>`;
+  return `<div class="staff-screen products-screen"><div class="staff-heading row"><div><p>Point of sale</p><h1>New order</h1></div><button class="cart-button" data-staff-view="cart">${icon("ShoppingCart")}<span>${cartCount()}</span></button></div><label class="search-box large">${icon("Search")}<input id="pos-search" value="${escapeHtml(ui.posSearch)}" placeholder="Search finished products" /></label>${categoryFilters}<div class="staff-product-grid">${products.length ? products.map((product) => `<article class="staff-product ${product.availableStock <= 0 ? "sold-out" : ""}">${productVisual(product, true)}<div><h2 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h2><p>${escapeHtml(categoryName(product.categoryId))}</p><strong>${money.format(product.price)}</strong><small>${product.availableStock <= 0 ? "Unavailable — configure recipe or restock" : `${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"} available`}</small></div><button data-action="add-cart" data-id="${product.id}" ${product.availableStock <= 0 ? "disabled" : ""} aria-label="Add ${escapeHtml(product.name)}">${icon("Plus")}</button></article>`).join("") : emptyState("Coffee", "No menu items found", "Try another category or search term.")}</div></div>`;
 }
 
 function renderCart(): string {
@@ -638,7 +663,8 @@ function renderStaffOrders(): string {
 }
 
 function renderStaffInventory(): string {
-  return `<div class="staff-screen"><div class="staff-heading"><p>Stock visibility</p><h1>Inventory</h1></div><div class="mobile-inventory">${ui.data.products.length ? ui.data.products.map((product) => `<article>${productVisual(product)}<div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(categoryName(product.categoryId))}</small></div><b>${number.format(product.currentStock)} ${escapeHtml(product.unit)}</b>${statusPill(stockStatus(product))}</article>`).join("") : emptyState("Box", "No inventory", "Products added by an administrator will appear here.")}</div></div>`;
+  const materials = rawMaterials();
+  return `<div class="staff-screen"><div class="staff-heading"><p>Stock visibility</p><h1>Raw material inventory</h1></div><div class="mobile-inventory">${materials.length ? materials.map((product) => `<article>${productVisual(product)}<div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(categoryName(product.categoryId))}</small></div><b>${number.format(product.currentStock)} ${escapeHtml(product.unit)}</b>${statusPill(stockStatus(product))}</article>`).join("") : emptyState("Box", "No raw materials", "Raw materials added by an administrator will appear here.")}</div></div>`;
 }
 
 function renderStaffAccount(): string {
@@ -661,6 +687,7 @@ function bindStaff(): void {
   onAction("print", () => window.print());
   onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
   onAction("staff-sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
+  document.querySelectorAll<HTMLButtonElement>("[data-pos-category]").forEach((button) => button.addEventListener("click", () => { ui.posCategory = button.dataset.posCategory ?? "all"; renderStaff(); }));
   document.querySelector<HTMLInputElement>("#pos-search")?.addEventListener("input", (event) => { ui.posSearch = (event.currentTarget as HTMLInputElement).value; renderStaff(); document.querySelector<HTMLInputElement>("#pos-search")?.focus(); });
   bindPasswordForm("#staff-password-form");
 }
@@ -718,12 +745,13 @@ function onAction(name: string, handler: (button: HTMLButtonElement) => void | P
 
 function addToCart(productId: string): void {
   const product = ui.data.products.find((item) => item.id === productId);
-  if (!product || product.currentStock <= 0) return;
-  const item = ui.cart.find((entry) => entry.productId === productId);
-  if (item) {
-    if (item.quantity >= product.currentStock) { toast("No more stock is available for this product.", "error"); return; }
-    item.quantity += 1;
-  } else ui.cart.push({ productId, quantity: 1 });
+  if (!product || product.type !== "finished_product" || product.availableStock <= 0) return;
+  const nextCart = ui.cart.map((entry) => ({ ...entry }));
+  const nextItem = nextCart.find((entry) => entry.productId === productId);
+  if (nextItem) nextItem.quantity += 1;
+  else nextCart.push({ productId, quantity: 1 });
+  if (!cartIngredientsAvailable(nextCart)) { toast("There are not enough recipe ingredients for another serving.", "error"); return; }
+  ui.cart = nextCart;
   persistPosState();
   renderStaff(); toast(`${product.name} added to the order.`, "success");
 }
@@ -734,14 +762,30 @@ function changeCart(productId: string, change: number): void {
   if (!item || !product) return;
   const next = item.quantity + change;
   if (next <= 0) ui.cart = ui.cart.filter((entry) => entry.productId !== productId);
-  else if (next <= product.currentStock) item.quantity = next;
-  else toast("The requested quantity exceeds current stock.", "error");
+  else {
+    const nextCart = ui.cart.map((entry) => entry.productId === productId ? { ...entry, quantity: next } : { ...entry });
+    if (cartIngredientsAvailable(nextCart)) ui.cart = nextCart;
+    else toast("There are not enough recipe ingredients for another serving.", "error");
+  }
   persistPosState();
   renderStaff();
 }
 
 function cartCount(): number { return ui.cart.reduce((sum, item) => sum + item.quantity, 0); }
 function cartTotal(): number { return ui.cart.reduce((sum, item) => { const product = ui.data.products.find((entry) => entry.id === item.productId); return sum + (product?.price ?? 0) * item.quantity; }, 0); }
+
+function cartIngredientsAvailable(cart: CartItem[]): boolean {
+  const required = new Map<string, number>();
+  for (const item of cart) {
+    const product = ui.data.products.find((candidate) => candidate.id === item.productId);
+    if (!product || product.type !== "finished_product" || !product.recipe.length) return false;
+    for (const recipe of product.recipe) required.set(recipe.ingredientId, (required.get(recipe.ingredientId) ?? 0) + recipe.quantity * item.quantity);
+  }
+  return [...required].every(([ingredientId, quantity]) => {
+    const ingredient = ui.data.products.find((product) => product.id === ingredientId && product.type === "raw_material");
+    return Boolean(ingredient && ingredient.currentStock + Number.EPSILON >= quantity);
+  });
+}
 
 async function confirmPayment(button: HTMLButtonElement): Promise<void> {
   if (!ui.selectedPayment || !ui.cart.length) return;
@@ -758,12 +802,6 @@ function openCategoryDialog(id?: string): void {
   openDialog({ title: category ? "Edit category" : "Add category", description: "Categories organize products in the Admin and Staff workspaces.", body: `<label class="field"><span>Category name</span><input name="name" value="${escapeHtml(category?.name ?? "")}" maxlength="50" required autofocus /></label>`, submitLabel: category ? "Save changes" : "Add category", onSubmit: async (form) => { const name = String(new FormData(form).get("name") ?? "").trim(); if (category) await api.updateCategory(category.id, name); else await api.createCategory(name); await completeMutation(category ? "Category updated." : "Category added."); } });
 }
 
-function openProductDialog(id?: string): void {
-  if (!ui.data.categories.length) { toast("Create a category before adding a product.", "info"); ui.productTab = "categories"; renderAdmin(); return; }
-  const product = ui.data.products.find((item) => item.id === id);
-  openDialog({ title: product ? "Edit product" : "Add product", description: "Save catalog information and an optional product photo.", wide: true, body: `<div class="product-form-grid"><label class="image-upload"><input id="product-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" /><span id="image-preview">${product ? productVisual(product, true) : icon("PackagePlus")}</span><strong>${product?.imageUrl ? "Replace photo" : "Upload photo"}</strong><small>JPEG, PNG or WebP · maximum 5 MB</small></label><div class="form-grid"><label class="field wide"><span>Product name</span><input name="name" value="${escapeHtml(product?.name ?? "")}" maxlength="80" required /></label><label class="field"><span>Category</span><select name="categoryId">${ui.data.categories.map((category) => `<option value="${category.id}" ${category.id === product?.categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}</select></label><label class="field"><span>Unit</span><input name="unit" value="${escapeHtml(product?.unit ?? "pcs")}" maxlength="12" required /></label><label class="field"><span>Current stock</span><input name="currentStock" type="number" min="0" step="0.001" value="${product?.currentStock ?? 0}" required /></label><label class="field"><span>Low-stock threshold</span><input name="lowStockThreshold" type="number" min="0" step="0.001" value="${product?.lowStockThreshold ?? 10}" required /></label><label class="field wide"><span>Unit price (PHP)</span><input name="price" type="number" min="0" step="0.01" value="${product?.price ?? 0}" required /></label>${product?.imageUrl ? `<label class="check-field wide"><input name="removeImage" type="checkbox" value="true" /> Remove current photo</label>` : ""}</div></div>`, submitLabel: product ? "Save changes" : "Add product", onOpen: () => bindImagePreview(), onSubmit: async (form) => { const data = new FormData(form); ["currentStock", "lowStockThreshold", "price"].forEach((name) => data.set(name, String(Number(data.get(name))))); data.set("removeImage", String(data.get("removeImage") === "true")); if (product) await api.updateProduct(product.id, data); else await api.createProduct(data); await completeMutation(product ? "Product updated." : "Product added."); } });
-}
-
 function bindImagePreview(): void {
   document.querySelector<HTMLInputElement>("#product-image")?.addEventListener("change", (event) => {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
@@ -774,16 +812,11 @@ function bindImagePreview(): void {
   });
 }
 
-function openStockDialog(id?: string): void {
-  const movement = ui.data.stockMovements.find((item) => item.id === id);
-  openDialog({ title: movement ? "Edit stock entry" : "Add stock", description: "Stock changes are recorded transactionally in Supabase.", body: `<label class="field"><span>Product</span><select name="productId" ${movement ? "disabled" : ""}>${ui.data.products.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>Quantity added</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label></div>`, submitLabel: movement ? "Save changes" : "Add stock", onSubmit: async (form) => { const data = new FormData(form); const body = { productId: String(data.get("productId") ?? movement?.productId), quantity: Number(data.get("quantity")), date: String(data.get("date")), note: String(data.get("note") ?? "") }; if (movement) await api.updateStock(movement.id, body); else await api.createStock(body); await completeMutation(movement ? "Stock entry updated." : "Stock added."); } });
-}
-
 function openSaleStatusDialog(id: string, status: SaleStatus): void {
   const sale = ui.data.sales.find((item) => item.id === id);
   if (!sale) return;
   const cancelling = status === "Cancelled";
-  confirmDelete(cancelling ? "Cancel and refund order?" : "Restore order?", cancelling ? `${sale.receipt} will be cancelled and all quantities returned to stock.` : `${sale.receipt} will be completed again and its quantities deducted from stock.`, async () => { await api.updateSaleStatus(id, status); await completeMutation(cancelling ? "Order refunded and stock restored." : "Order restored."); });
+  confirmDelete(cancelling ? "Cancel and refund order?" : "Restore order?", cancelling ? `${sale.receipt} will be cancelled and its consumed raw materials returned to inventory.` : `${sale.receipt} will be completed again and its original recipe quantities deducted from inventory.`, async () => { await api.updateSaleStatus(id, status); await completeMutation(cancelling ? "Order refunded and raw material stock restored." : "Order restored and ingredients deducted."); });
 }
 
 function openReportExportDialog(): void {
@@ -925,9 +958,100 @@ function bindPasswordForm(selector: string): void {
   });
 }
 
+function openStockDialog(id?: string): void {
+  const movement = ui.data.stockMovements.find((item) => item.id === id);
+  const materials = rawMaterials();
+  if (!materials.length) { toast("Add a raw material before recording stock.", "info"); return; }
+  openDialog({
+    title: movement ? "Edit stock entry" : "Add raw material stock",
+    description: "Stock changes are recorded transactionally in Supabase.",
+    body: `<label class="field"><span>Raw material</span><select name="productId" ${movement ? "disabled" : ""}>${materials.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>Quantity added</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label></div>`,
+    submitLabel: movement ? "Save changes" : "Add stock",
+    onSubmit: async (form) => {
+      const data = new FormData(form);
+      const body = { productId: String(data.get("productId") ?? movement?.productId), quantity: Number(data.get("quantity")), date: String(data.get("date")), note: String(data.get("note") ?? "") };
+      if (movement) await api.updateStock(movement.id, body); else await api.createStock(body);
+      await completeMutation(movement ? "Stock entry updated." : "Stock added.");
+    },
+  });
+}
+
+function openProductDialog(id?: string, typeOverride?: Product["type"]): void {
+  if (!ui.data.categories.length) { toast("Create a category before adding a product.", "info"); ui.productTab = "categories"; renderAdmin(); return; }
+  const product = ui.data.products.find((item) => item.id === id);
+  const type = typeOverride ?? product?.type ?? (ui.productTab === "raw_material" ? "raw_material" : "finished_product");
+  const isFinished = type === "finished_product";
+  const excludedIngredientId = product?.type === "raw_material" && isFinished ? product.id : undefined;
+  const availableIngredients = rawMaterials().filter((material) => material.id !== excludedIngredientId);
+  const recipeRows = product?.recipe ?? [];
+  const recipeBody = recipeRows.map((recipe) => recipeIngredientRow(recipe.ingredientId, recipe.quantity, excludedIngredientId)).join("");
+  const typeFields = isFinished
+    ? `<input name="unit" type="hidden" value="serving" /><input name="currentStock" type="hidden" value="0" /><input name="lowStockThreshold" type="hidden" value="0" /><label class="field"><span>Unit price (PHP)</span><input name="price" type="number" min="0" step="0.01" value="${product?.price ?? 0}" required /></label><fieldset class="recipe-editor wide"><legend>Recipe for one serving</legend><p>${availableIngredients.length ? "Quantities use each raw material's inventory unit. Leave empty to keep this item unavailable in POS." : "Add raw materials first to configure a recipe. You can still save the product details and photo now."}</p><div id="recipe-rows">${recipeBody}</div><button class="small-button" id="add-recipe-row" type="button" ${availableIngredients.length ? "" : "disabled"}>${icon("Plus")} Add ingredient</button></fieldset>`
+    : `<label class="field"><span>Inventory unit</span><input name="unit" value="${escapeHtml(product?.unit ?? "mL")}" maxlength="12" placeholder="mL, g, pcs" required /></label>${product ? `<input name="currentStock" type="hidden" value="0" /><div class="field wide stock-readonly"><span>Current stock</span><strong>${number.format(product.currentStock)} ${escapeHtml(product.unit)}</strong><small>Use Add stock in Inventory to change the on-hand quantity.</small></div>` : `<label class="field"><span>Opening stock</span><input name="currentStock" type="number" min="0" step="0.001" value="0" required /></label>`}<label class="field"><span>Low-stock threshold</span><input name="lowStockThreshold" type="number" min="0" step="0.001" value="${product?.lowStockThreshold ?? 10}" required /></label><input name="price" type="hidden" value="0" />`;
+  openDialog({
+    title: product ? `Edit ${isFinished ? "finished product" : "raw material"}` : `Add ${isFinished ? "finished product" : "raw material"}`,
+    description: isFinished ? "Set the sales price and ingredient quantity required for one serving." : "Stock is maintained in this unit and replenished through inventory movements.",
+    wide: true,
+    body: `<div class="product-form-grid"><label class="image-upload"><input id="product-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" /><span id="image-preview">${product ? productVisual(product, true) : icon("PackagePlus")}</span><strong>${product?.imageUrl ? "Replace photo" : "Upload photo"}</strong><small>JPEG, PNG or WebP · maximum 5 MB</small></label><div class="form-grid"><input name="recipe" type="hidden" value="[]" /><label class="field"><span>Type</span><select id="product-type-selector" name="productType"><option value="finished_product" ${isFinished ? "selected" : ""}>Finished product / sales item</option><option value="raw_material" ${isFinished ? "" : "selected"}>Raw material / ingredient</option></select></label><label class="field"><span>Category</span><select name="categoryId">${ui.data.categories.map((category) => `<option value="${category.id}" ${category.id === product?.categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}</select></label><label class="field wide"><span>${isFinished ? "Finished product" : "Raw material"} name</span><input name="name" value="${escapeHtml(product?.name ?? "")}" maxlength="80" required /></label>${typeFields}${product?.imageUrl ? `<label class="check-field wide"><input name="removeImage" type="checkbox" value="true" /> Remove current photo</label>` : ""}</div></div>`,
+    submitLabel: product ? "Save changes" : `Add ${isFinished ? "sales item" : "raw material"}`,
+    onOpen: () => {
+      bindImagePreview();
+      if (isFinished) bindRecipeEditor(excludedIngredientId);
+      document.querySelector<HTMLSelectElement>("#product-type-selector")?.addEventListener("change", (event) => {
+        const nextType = (event.currentTarget as HTMLSelectElement).value as Product["type"];
+        closeDialog();
+        openProductDialog(id, nextType);
+      });
+    },
+    onSubmit: async (form) => {
+      const data = new FormData(form);
+      if (isFinished) data.set("recipe", JSON.stringify(readRecipeEditor()));
+      ["currentStock", "lowStockThreshold", "price"].forEach((name) => data.set(name, String(Number(data.get(name)))));
+      data.set("removeImage", String(data.get("removeImage") === "true"));
+      if (product) await api.updateProduct(product.id, data); else await api.createProduct(data);
+      await completeMutation(product ? "Product updated." : "Product added.");
+    },
+  });
+}
+
+function recipeIngredientRow(ingredientId: string, quantity: number, excludedIngredientId?: string): string {
+  const materials = rawMaterials().filter((material) => material.id !== excludedIngredientId);
+  const selected = materials.find((material) => material.id === ingredientId) ?? materials[0];
+  return `<div class="recipe-row"><label class="field"><span>Ingredient</span><select data-recipe-ingredient>${materials.map((material) => `<option value="${material.id}" ${material.id === selected?.id ? "selected" : ""}>${escapeHtml(material.name)}</option>`).join("")}</select></label><label class="field recipe-quantity"><span>Quantity</span><span><input data-recipe-quantity type="number" min="0.001" step="0.001" value="${quantity}" required /><b data-recipe-unit>${escapeHtml(selected?.unit ?? "")}</b></span></label><button type="button" data-remove-recipe aria-label="Remove ingredient">${icon("Trash2")}</button></div>`;
+}
+
+function bindRecipeEditor(excludedIngredientId?: string): void {
+  const rows = document.querySelector<HTMLElement>("#recipe-rows");
+  const bindRow = (row: HTMLElement): void => {
+    const select = row.querySelector<HTMLSelectElement>("[data-recipe-ingredient]");
+    select?.addEventListener("change", () => {
+      const material = rawMaterials().find((item) => item.id === select.value);
+      const unit = row.querySelector<HTMLElement>("[data-recipe-unit]");
+      if (unit) unit.textContent = material?.unit ?? "";
+    });
+    row.querySelector<HTMLButtonElement>("[data-remove-recipe]")?.addEventListener("click", () => {
+      row.remove();
+    });
+  };
+  rows?.querySelectorAll<HTMLElement>(".recipe-row").forEach(bindRow);
+  document.querySelector<HTMLButtonElement>("#add-recipe-row")?.addEventListener("click", () => {
+    const material = rawMaterials().find((item) => item.id !== excludedIngredientId);
+    rows?.insertAdjacentHTML("beforeend", recipeIngredientRow(material?.id ?? "", 1, excludedIngredientId));
+    const row = rows?.lastElementChild;
+    if (row instanceof HTMLElement) { hydrate(row); bindRow(row); }
+  });
+}
+
+function readRecipeEditor(): Array<{ ingredientId: string; quantity: number }> {
+  return [...document.querySelectorAll<HTMLElement>(".recipe-row")].map((row) => ({
+    ingredientId: row.querySelector<HTMLSelectElement>("[data-recipe-ingredient]")?.value ?? "",
+    quantity: Number(row.querySelector<HTMLInputElement>("[data-recipe-quantity]")?.value),
+  }));
+}
+
 async function logout(): Promise<void> {
   try { await api.logout(); } catch { /* Clear the local UI even if the session already expired. */ }
-  window.clearInterval(notificationTimer); ui.session = null; ui.roleChoice = null; ui.data = emptyData(); ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; ui.report = null;
+  window.clearInterval(notificationTimer); ui.session = null; ui.roleChoice = null; ui.data = emptyData(); ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; ui.report = null; ui.posSearch = ""; ui.posCategory = "all";
   window.sessionStorage.removeItem(posStateKey); closeDialog(); syncLocation(true); render();
 }
 
