@@ -345,7 +345,7 @@ function renderAccess(): void {
 }
 
 function roleCard(role: UserRole, imageUrl: string, title: string, copy: string): string {
-  return `<button class="role-card" type="button" data-role="${role}"><span class="role-card-avatar"><img src="${imageUrl}" alt="${title}" /></span><div><strong>${title}</strong><small>${copy}</small></div><i>${icon("ArrowLeft")}</i></button>`;
+  return `<button class="role-card" type="button" data-role="${role}"><img class="role-card-img" src="${imageUrl}" alt="${title}" /><strong class="role-card-title">${title}</strong><p class="role-card-desc">${copy}</p></button>`;
 }
 
 function bindLogin(): void {

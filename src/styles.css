@@ -50,16 +50,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .access-heading p, .eyebrow { margin: 0 0 7px; color: var(--brown-600); font: 800 .68rem/1.3 Inter, "Segoe UI", sans-serif; letter-spacing: .14em; text-transform: uppercase; }
 .access-heading h1 { margin-bottom: 10px; font-size: clamp(1.65rem, 3vw, 2.25rem); letter-spacing: -.04em; }
 .access-heading span { color: var(--muted); font-size: .94rem; }
-.role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.role-card { display: grid; grid-template-columns: 60px 1fr 28px; align-items: center; gap: 18px; min-height: 154px; padding: 24px; color: var(--ink); background: white; border: 1px solid var(--border); border-radius: 16px; text-align: left; transition: border-color .18s, transform .18s, box-shadow .18s; }
-.role-card:hover { border-color: #c79d81; box-shadow: var(--shadow); transform: translateY(-2px); }
-.role-card > span, .role-card-avatar { display: grid; place-items: center; width: 60px; height: 60px; color: var(--brown-700); background: var(--brown-100); border-radius: 50%; overflow: hidden; border: 1px solid rgba(139, 61, 16, 0.15); }
-.role-card > span svg { width: 28px; height: 28px; }
-.role-card-avatar img, .role-card > span img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-.role-card div { display: grid; gap: 7px; }
-.role-card strong { font-size: 1.08rem; }
-.role-card small { color: var(--muted); font-size: .79rem; line-height: 1.55; }
-.role-card > i { color: var(--brown-600); transform: rotate(180deg); }
+.role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.role-card { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 36px 24px; color: var(--ink); background: white; border: 1px solid var(--border); border-radius: 20px; text-align: center; transition: border-color .18s, transform .18s, box-shadow .18s; cursor: pointer; }
+.role-card:hover { border-color: #c79d81; box-shadow: 0 12px 32px rgba(139, 61, 16, 0.08); transform: translateY(-3px); }
+.role-card-img { width: min(190px, 85%); height: auto; aspect-ratio: 1 / 1; object-fit: contain; margin-bottom: 16px; transition: transform .2s ease; }
+.role-card:hover .role-card-img { transform: scale(1.04); }
+.role-card-title { display: block; margin-bottom: 6px; font-size: 1.55rem; font-weight: 800; color: #382013; letter-spacing: -.03em; }
+.role-card-desc { margin: 0; color: #705e54; font-size: .88rem; line-height: 1.5; max-width: 230px; }
 
 .login-shell { display: grid; grid-template-columns: 1fr 1fr; height: 100dvh; background: #fff; }
 .login-panel { display: grid; place-items: center; min-width: 0; padding: 28px; overflow: auto; }
@@ -530,8 +527,9 @@ span.settings-avatar { display: grid; place-items: center; }
   .login-page { overflow: auto; }
   .access-page { padding: 14px; }
   .access-card { padding: 26px 18px; border-radius: 17px; }
-  .role-grid { grid-template-columns: 1fr; }
-  .role-card { min-height: 118px; }
+  .role-grid { grid-template-columns: 1fr; gap: 16px; }
+  .role-card { padding: 24px 16px; }
+  .role-card-img { width: 140px; margin-bottom: 12px; }
   .login-shell { grid-template-columns: 1fr; min-height: 100dvh; height: auto; }
   .login-panel { min-height: 100dvh; }
   .login-visual { display: none; }
