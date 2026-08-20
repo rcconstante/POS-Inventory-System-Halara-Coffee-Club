@@ -283,6 +283,7 @@ function startNotificationPolling(): void {
   }, 30_000);
 }
 
+
 function renderLoading(message: string): void {
   app.innerHTML = `<main class="loading-screen"><img src="${logoUrl}" alt="Company logo" /><span>${icon("LoaderCircle", "spin")}</span><p>${escapeHtml(message)}</p></main>`;
   hydrate(app);
@@ -293,14 +294,6 @@ function render(): void {
   if (!ui.session) renderAccess();
   else if (ui.session.role === "admin") renderAdmin();
   else renderStaff();
-}
-
-function renderAccess(): void {
-  if (!ui.roleChoice) {
-  } finally {
-    ui.loading = false;
-    render();
-  }
 }
 
 async function refreshAll(shouldRender = true): Promise<void> {
