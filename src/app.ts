@@ -6,7 +6,7 @@ import {
   Tag, Trash2, Truck, Upload, UserRound, WalletCards, X, createIcons, type Icons,
 } from "lucide";
 import {
-  api, type AppData, type Category, type NotificationItem, type PaymentMethod, type Product,
+  api, type AppData, type CashShift, type Category, type InventoryReport, type NotificationItem, type PaymentMethod, type Product,
   type ReportSummary, type Sale, type SaleStatus, type UserRole,
   type UserSession,
 } from "./api";
@@ -26,13 +26,14 @@ const icons: Icons = {
   Tag, Trash2, Truck, Upload, UserRound, WalletCards, X,
 };
 
-type AdminRoute = "dashboard" | "sales" | "products" | "inventory" | "reports" | "settings";
+type AdminRoute = "dashboard" | "sales" | "products" | "inventory" | "cash" | "reports" | "settings";
 type ProductTab = "finished_product" | "raw_material" | "categories";
-type StaffView = "dashboard" | "products" | "cart" | "payment" | "success" | "orders" | "inventory" | "account";
+type StaffView = "dashboard" | "products" | "cart" | "payment" | "success" | "orders" | "inventory" | "cash" | "account";
+type ReportTab = "sales" | "inventory";
 type ToastKind = "success" | "error" | "info";
 
-const adminRoutes: readonly AdminRoute[] = ["dashboard", "sales", "products", "inventory", "reports", "settings"];
-const staffViews: readonly StaffView[] = ["dashboard", "products", "cart", "payment", "success", "orders", "inventory", "account"];
+const adminRoutes: readonly AdminRoute[] = ["dashboard", "sales", "products", "inventory", "cash", "reports", "settings"];
+const staffViews: readonly StaffView[] = ["dashboard", "products", "cart", "payment", "success", "orders", "inventory", "cash", "account"];
 const posStateKey = "halara-pos-workflow";
 
 interface CartItem { productId: string; quantity: number }
@@ -57,16 +58,21 @@ interface UiState {
   loading: boolean;
   cart: CartItem[];
   selectedPayment: PaymentMethod | null;
+  cashReceived: number | null;
+  paymentReference: string | null;
   completedSale: Sale | null;
   reportRange: { from: string; to: string };
   report: ReportSummary | null;
+  inventoryReport: InventoryReport | null;
+  reportTab: ReportTab;
   reportLoading: boolean;
+  cashFilters: { from: string; to: string; status: "all" | CashShift["status"]; cashier: string };
   productSearch: string;
   posSearch: string;
   posCategory: string;
 }
 
-const emptyData = (): AppData => ({ categories: [], products: [], stockMovements: [], sales: [] });
+const emptyData = (): AppData => ({ categories: [], products: [], stockMovements: [], sales: [], cashShifts: [], cashMovements: [], ingredientUsage: [] });
 
 function manilaDate(offsetDays = 0): string {
   const date = new Date(Date.now() + offsetDays * 86_400_000);
@@ -92,10 +98,15 @@ const ui: UiState = {
   loading: true,
   cart: [],
   selectedPayment: null,
+  cashReceived: null,
+  paymentReference: null,
   completedSale: null,
   reportRange: { from: manilaDate(-6), to: manilaDate() },
   report: null,
+  inventoryReport: null,
+  reportTab: "sales",
   reportLoading: false,
+  cashFilters: { from: manilaDate(-30), to: manilaDate(), status: "all", cashier: "" },
   productSearch: "",
   posSearch: "",
   posCategory: "all",
@@ -104,8 +115,21 @@ const ui: UiState = {
 const app = required<HTMLDivElement>("#app");
 const modalRoot = required<HTMLDivElement>("#modal-root");
 const toastRegion = required<HTMLDivElement>("#toast-region");
-let notificationTimer: number | undefined;
+let realtimeUnsubscribe: (() => void) | null = null;
+let realtimeRefreshTimer: number | undefined;
+let refreshPromise: Promise<void> | null = null;
 let installPrompt: InstallPromptEvent | null = null;
+let notificationTrigger: HTMLButtonElement | null = null;
+let intentionalLogout = false;
+
+api.subscribeSessionExpiry(() => {
+  if (!ui.session || intentionalLogout) return;
+  realtimeUnsubscribe?.(); realtimeUnsubscribe = null;
+  window.clearTimeout(realtimeRefreshTimer);
+  ui.session = null; ui.data = emptyData(); ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null;
+  window.sessionStorage.removeItem(posStateKey);
+  closeDialog(); render(); toast("Your session ended. Please sign in again.", "info");
+});
 
 function required<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -129,6 +153,8 @@ function hydrate(root: HTMLElement | Document = document): void {
 const money = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
 const number = new Intl.NumberFormat("en-PH", { maximumFractionDigits: 3 });
 const compactDate = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" });
+const manilaDateTime = new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+const manilaIsoDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" });
 
 function formatDate(value: string): string {
   const date = new Date(`${value}T00:00:00+08:00`);
@@ -137,6 +163,16 @@ function formatDate(value: string): string {
 
 function categoryName(id: string): string {
   return ui.data.categories.find((category) => category.id === id)?.name ?? "Uncategorized";
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : manilaDateTime.format(date);
+}
+
+function manilaDateFromTimestamp(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value.slice(0, 10) : manilaIsoDate.format(date);
 }
 
 const untrackedFinishedCategories = new Set(["Pasta", "Not Coffee", "Tea Refreshers and Soda", "Add-ons"]);
@@ -152,6 +188,14 @@ function stockStatus(product: Product): "Available" | "Low stock" | "Out of stoc
 
 function saleTotal(sale: Sale): number {
   return sale.total ?? sale.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+}
+
+function saleStatusLocked(sale: Sale): boolean {
+  return sale.payment === "Cash" && sale.cashShiftId !== null && ui.data.cashShifts.some((shift) => shift.id === sale.cashShiftId && shift.status === "Closed");
+}
+
+function canChangeSaleStatus(sale: Sale): boolean {
+  return !saleStatusLocked(sale) && (ui.session?.role === "admin" || sale.createdBy === ui.session?.id);
 }
 
 function productVisual(product: Product, large = false): string {
@@ -213,6 +257,8 @@ function restorePosState(): void {
     const saved = JSON.parse(window.sessionStorage.getItem(posStateKey) ?? "null") as {
       cart?: CartItem[];
       selectedPayment?: PaymentMethod | null;
+      cashReceived?: number | null;
+      paymentReference?: string | null;
       completedSaleId?: string | null;
     } | null;
     const remaining = new Map(rawMaterials().map((material) => [material.id, material.currentStock]));
@@ -232,6 +278,8 @@ function restorePosState(): void {
       for (const recipe of product.recipe) remaining.set(recipe.ingredientId, (remaining.get(recipe.ingredientId) ?? 0) - recipe.quantity * quantity);
     }
     ui.selectedPayment = saved?.selectedPayment === "Cash" || saved?.selectedPayment === "GCash" || saved?.selectedPayment === "Maya" ? saved.selectedPayment : null;
+    ui.cashReceived = typeof saved?.cashReceived === "number" && Number.isFinite(saved.cashReceived) && saved.cashReceived >= 0 ? saved.cashReceived : null;
+    ui.paymentReference = typeof saved?.paymentReference === "string" ? saved.paymentReference : null;
     ui.completedSale = saved?.completedSaleId ? ui.data.sales.find((sale) => sale.id === saved.completedSaleId) ?? null : null;
   } catch {
     window.sessionStorage.removeItem(posStateKey);
@@ -242,6 +290,8 @@ function persistPosState(): void {
   window.sessionStorage.setItem(posStateKey, JSON.stringify({
     cart: ui.cart,
     selectedPayment: ui.selectedPayment,
+    cashReceived: ui.cashReceived,
+    paymentReference: ui.paymentReference,
     completedSaleId: ui.completedSale?.id ?? null,
   }));
 }
@@ -279,7 +329,7 @@ async function bootstrap(): Promise<void> {
       try { ui.report = await api.report(ui.reportRange.from, ui.reportRange.to); }
       catch { ui.report = null; }
     }
-    startNotificationPolling();
+    startRealtimeSync();
   } catch {
     ui.session = null;
     restoreLocationState();
@@ -291,25 +341,33 @@ async function bootstrap(): Promise<void> {
 }
 
 async function refreshAll(shouldRender = true): Promise<void> {
-  const [data, notificationData] = await Promise.all([api.appData(), api.notifications()]);
-  ui.data = data;
-  ui.notifications = notificationData.notifications;
-  ui.unread = notificationData.unread;
+  if (!refreshPromise) {
+    refreshPromise = Promise.all([api.appData(), api.notifications()]).then(([data, notificationData]) => {
+      ui.data = data;
+      ui.notifications = notificationData.notifications;
+      ui.unread = notificationData.unread;
+    }).finally(() => { refreshPromise = null; });
+  }
+  await refreshPromise;
   if (shouldRender) render();
 }
 
-function startNotificationPolling(): void {
-  window.clearInterval(notificationTimer);
-  notificationTimer = window.setInterval(async () => {
-    if (!ui.session || document.hidden) return;
-    try {
-      const result = await api.notifications();
-      ui.notifications = result.notifications;
-      ui.unread = result.unread;
-      const badge = document.querySelector<HTMLElement>("[data-notification-count]");
-      if (badge) badge.textContent = result.unread ? String(result.unread) : "";
-    } catch { /* The next refresh retries quietly. */ }
-  }, 30_000);
+function startRealtimeSync(): void {
+  realtimeUnsubscribe?.();
+  realtimeUnsubscribe = api.subscribeWorkspace(() => {
+    window.clearTimeout(realtimeRefreshTimer);
+    realtimeRefreshTimer = window.setTimeout(async () => {
+      if (!ui.session) return;
+      try {
+        await refreshAll(false);
+        if (ui.route === "reports") {
+          if (ui.reportTab === "sales") ui.report = await api.report(ui.reportRange.from, ui.reportRange.to);
+          else ui.inventoryReport = await api.inventoryReport(ui.reportRange.from, ui.reportRange.to);
+        }
+        if (!modalRoot.children.length) render();
+      } catch { /* Supabase reconnects the channel; the next event retries. */ }
+    }, 180);
+  });
 }
 
 
@@ -411,7 +469,7 @@ function bindLogin(): void {
       ui.session = await api.login(ui.roleChoice!, email, password);
       ui.route = "dashboard"; ui.staffView = "dashboard";
       syncLocation(true);
-      await refreshAll(false); startNotificationPolling(); render();
+      await refreshAll(false); startRealtimeSync(); render();
       toast("Signed in successfully.", "success");
     } catch (error) {
       setText("#login-error", errorMessage(error));
@@ -432,6 +490,7 @@ function renderAdmin(): void {
           ${adminNav("sales", "Receipt", "Sales")}
           ${adminNav("products", "Box", "Products")}
           ${adminNav("inventory", "Truck", "Inventory")}
+          ${adminNav("cash", "WalletCards", "Cash Management")}
           ${adminNav("reports", "BarChart3", "Reports")}
           ${adminNav("settings", "Settings", "Settings")}
         </nav>
@@ -461,7 +520,7 @@ function adminNav(route: AdminRoute, iconName: string, label: string): string {
 }
 
 function adminTitle(): string {
-  return ({ dashboard: "Dashboard overview", sales: "Sales management", products: "Product management", inventory: "Stock management", reports: "Sales reports", settings: "Settings" } satisfies Record<AdminRoute, string>)[ui.route];
+  return ({ dashboard: "Dashboard overview", sales: "Sales management", products: "Product management", inventory: "Stock management", cash: "Cash management", reports: "Reports", settings: "Settings" } satisfies Record<AdminRoute, string>)[ui.route];
 }
 
 function renderAdminRoute(): string {
@@ -469,6 +528,7 @@ function renderAdminRoute(): string {
   if (ui.route === "sales") return renderSales();
   if (ui.route === "products") return renderProductsManagement();
   if (ui.route === "inventory") return renderInventory();
+  if (ui.route === "cash") return renderAdminCash();
   if (ui.route === "reports") return renderReports();
   return renderSettings();
 }
@@ -504,7 +564,7 @@ function renderSales(): string {
 
 function salesTable(sales: Sale[], compact = false): string {
   if (!sales.length) return emptyState("Receipt", "No sales yet", "Completed POS orders will appear here.");
-  return `<div class="table-scroll"><table><thead><tr><th>Receipt</th><th>Date</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th>${compact ? "" : "<th>Action</th>"}</tr></thead><tbody>${sales.map((sale) => `<tr data-sale-row data-search="${escapeHtml(`${sale.receipt} ${sale.payment} ${sale.status}`.toLowerCase())}" data-status="${sale.status}"><td data-label="Receipt"><strong>${escapeHtml(sale.receipt)}</strong></td><td data-label="Date">${formatDate(sale.date)}</td><td data-label="Items">${sale.items.reduce((sum, item) => sum + item.quantity, 0)}</td><td data-label="Total"><strong>${money.format(saleTotal(sale))}</strong></td><td data-label="Payment">${escapeHtml(sale.payment)}</td><td data-label="Status">${statusPill(sale.status)}</td>${compact ? "" : `<td data-label="Action"><button class="small-button" data-action="sale-status" data-id="${sale.id}" data-status="${sale.status === "Completed" ? "Cancelled" : "Completed"}">${sale.status === "Completed" ? "Cancel / refund" : "Restore"}</button></td>`}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="table-scroll"><table><thead><tr><th>Receipt</th><th>Date</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th>${compact ? "" : "<th>Action</th>"}</tr></thead><tbody>${sales.map((sale) => `<tr data-sale-row data-search="${escapeHtml(`${sale.receipt} ${sale.payment} ${sale.status}`.toLowerCase())}" data-status="${sale.status}"><td data-label="Receipt"><strong>${escapeHtml(sale.receipt)}</strong></td><td data-label="Date">${formatDate(sale.date)}</td><td data-label="Items">${sale.items.reduce((sum, item) => sum + item.quantity, 0)}</td><td data-label="Total"><strong>${money.format(saleTotal(sale))}</strong></td><td data-label="Payment">${escapeHtml(sale.payment)}</td><td data-label="Status">${statusPill(sale.status)}</td>${compact ? "" : `<td data-label="Action"><div class="row-actions"><button class="small-button" data-action="view-receipt" data-id="${sale.id}">Receipt</button><button class="small-button" data-action="sale-status" data-id="${sale.id}" data-status="${sale.status === "Completed" ? "Cancelled" : "Completed"}" ${saleStatusLocked(sale) ? `disabled title="Closed-shift cash receipts are immutable"` : ""}>${saleStatusLocked(sale) ? "Reconciled" : sale.status === "Completed" ? "Cancel / refund" : "Restore"}</button></div></td>`}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderProductsManagement(): string {
@@ -526,15 +586,35 @@ function categoryCard(category: Category): string {
 function renderInventory(): string {
   const materials = rawMaterials();
   const movements = ui.data.stockMovements.filter((movement) => materials.some((product) => product.id === movement.productId));
-  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Record supplier deliveries; completed sales deduct recipe ingredients automatically", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Current stock</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Current stock">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="6">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article></section>`;
+  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Record costed supplier deliveries; completed sales deduct recipe ingredients automatically", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel valuation-table"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Current value</th><th>Action</th></tr></thead><tbody>${materials.map((product) => `<tr><td data-label="Material"><strong>${escapeHtml(product.name)}</strong></td><td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Average cost">${product.costInitialized ? `${money.format(product.averageUnitCost)} / ${escapeHtml(product.unit)}` : "Uncosted"}</td><td data-label="Current value">${product.costInitialized ? money.format(product.currentStock * product.averageUnitCost) : "Excluded"}</td><td data-label="Action">${product.costInitialized ? "—" : product.currentStock > 0 ? `<button class="small-button" data-action="set-cost-baseline" data-id="${product.id}">Set starting cost</button>` : "Add costed stock"}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Purchase cost</th><th>Current stock</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Purchase cost">${movement.totalCost === null ? "Uncosted legacy entry" : money.format(movement.totalCost)}</td><td data-label="Current stock">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="7">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article></section>`;
+}
+
+function shiftStatusPill(shift: CashShift): string { return statusPill(shift.status); }
+
+function renderAdminCash(): string {
+  const filters = ui.cashFilters;
+  const shifts = ui.data.cashShifts.filter((shift) => {
+    const date = manilaDateFromTimestamp(shift.openedAt);
+    return date >= filters.from && date <= filters.to && (filters.status === "all" || shift.status === filters.status) && shift.cashierName.toLowerCase().includes(filters.cashier.toLowerCase());
+  });
+  const open = shifts.filter((shift) => shift.status === "Open");
+  const variance = shifts.filter((shift) => shift.status === "Closed").reduce((sum, shift) => sum + (shift.variance ?? 0), 0);
+  return `<section class="page-section">${pageHeading("Cash control", "Cash Management", "Monitor cashier shifts, drawer activity, and reconciliation")}
+    <div class="metric-grid">${metric("Open shifts", String(open.length), "In filtered results", "WalletCards", open.length ? "warning" : "success")}${metric("Recorded shifts", String(shifts.length), "Filtered results", "Receipt")}${metric("Net variance", money.format(variance), "Closed shifts", "BarChart3", Math.abs(variance) > .001 ? "warning" : "success")}${metric("Cash movements", String(ui.data.cashMovements.filter((movement) => shifts.some((shift) => shift.id === movement.shiftId)).length), "Filtered shifts", "WalletCards")}</div>
+    <div class="cash-filter-bar"><label><span>From</span><input id="cash-from" type="date" value="${filters.from}" /></label><label><span>To</span><input id="cash-to" type="date" value="${filters.to}" /></label><label><span>Status</span><select id="cash-status"><option value="all" ${filters.status === "all" ? "selected" : ""}>All statuses</option><option value="Open" ${filters.status === "Open" ? "selected" : ""}>Open</option><option value="Closed" ${filters.status === "Closed" ? "selected" : ""}>Closed</option></select></label><label class="cashier-filter"><span>Cashier</span><input id="cash-cashier" value="${escapeHtml(filters.cashier)}" placeholder="Search cashier" /></label></div>
+    <article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Cashier</th><th>Opened</th><th>Status</th><th>Opening</th><th>Cash sales</th><th>Expected</th><th>Counted</th><th>Variance</th><th>Action</th></tr></thead><tbody>${shifts.length ? shifts.map((shift) => `<tr><td data-label="Cashier"><strong>${escapeHtml(shift.cashierName)}</strong></td><td data-label="Opened">${escapeHtml(formatDateTime(shift.openedAt))}</td><td data-label="Status">${shiftStatusPill(shift)}</td><td data-label="Opening">${money.format(shift.openingBalance)}</td><td data-label="Cash sales">${money.format(shift.cashSales)}</td><td data-label="Expected">${money.format(shift.expectedCash)}</td><td data-label="Counted">${shift.countedCash === null ? "—" : money.format(shift.countedCash)}</td><td data-label="Variance">${shift.variance === null ? "—" : money.format(shift.variance)}</td><td data-label="Action"><div class="row-actions"><button class="small-button" data-action="shift-details" data-id="${shift.id}">Details</button>${shift.status === "Open" ? `<button class="small-button danger" data-action="force-close-shift" data-id="${shift.id}">Force close</button>` : ""}</div></td></tr>`).join("") : `<tr><td colspan="9">${emptyState("WalletCards", "No matching cashier shifts", "Adjust the cashier, date, or status filters.")}</td></tr>`}</tbody></table></div></article>
+  </section>`;
 }
 
 function renderReports(): string {
   const report = ui.report;
-  const summary = report?.summary;
-  return `<section class="page-section">${pageHeading("Performance", "Sales report", "Metrics and exports are calculated from completed SQL transactions")}
+  const inventory = ui.inventoryReport;
+  const tabs = `<div class="tabs"><button data-report-tab="sales" class="${ui.reportTab === "sales" ? "active" : ""}">Sales</button><button data-report-tab="inventory" class="${ui.reportTab === "inventory" ? "active" : ""}">Inventory</button></div>`;
+  const salesBody = !report ? emptyState("BarChart3", "Report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Total sales", money.format(report.summary.totalSalesCentavos / 100), "Completed revenue", "BarChart3", "accent")}${metric("Transactions", String(report.summary.totalTransactions), "Completed orders", "CircleCheck", "success")}${metric("Average sale", money.format(report.summary.averageSaleCentavos / 100), "Per completed order", "Receipt")}</div><div class="report-grid"><article class="panel report-chart"><div class="panel-heading"><div><p class="eyebrow">Sales over time</p><h3>Daily revenue</h3></div></div>${revenueBars(report.daily)}</article><article class="panel report-ranking"><div class="panel-heading"><div><p class="eyebrow">Product mix</p><h3>Top sellers</h3></div></div>${report.topProducts.length ? `<ol class="rank-list">${report.topProducts.slice(0, 7).map((product, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.quantity} units sold</small></div><b>${money.format(product.totalCentavos / 100)}</b></li>`).join("")}</ol>` : emptyState("Box", "No completed sales", "Product rankings will appear after the first completed order.")}</article><article class="panel payment-summary"><div class="panel-heading"><div><p class="eyebrow">Payment mix</p><h3>Payment methods</h3></div></div>${report.payments.length ? `<div class="payment-list">${report.payments.map((item) => `<div><span>${escapeHtml(item.method)}<small>${item.transactions} transaction${item.transactions === 1 ? "" : "s"}</small></span><strong>${money.format(item.totalCentavos / 100)}</strong></div>`).join("")}</div>` : emptyState("WalletCards", "No payment activity", "Payment methods will appear after the first completed order.")}</article></div>`;
+  const inventoryBody = !inventory ? emptyState("Boxes", "Inventory report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Current value", money.format(inventory.summary.totalValueCentavos / 100), `${inventory.summary.valuedMaterials}/${inventory.summary.materialCount} materials costed`, "BarChart3", "accent")}${metric("Raw materials", String(inventory.summary.materialCount), "Current catalog", "Boxes")}${metric("Stock alerts", String(inventory.summary.lowStockCount), "Needs attention", "CircleAlert", inventory.summary.lowStockCount ? "warning" : "success")}</div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Value</th><th>Threshold</th><th>Status</th></tr></thead><tbody>${inventory.stock.map((row) => `<tr><td data-label="Material"><strong>${escapeHtml(row.name)}</strong></td><td data-label="On hand">${number.format(row.quantity)} ${escapeHtml(row.unit)}</td><td data-label="Average cost">${row.averageUnitCostCentavos === null ? "Uncosted" : `${money.format(row.averageUnitCostCentavos / 100)} / ${escapeHtml(row.unit)}`}</td><td data-label="Value">${row.valueCentavos === null ? "Excluded" : money.format(row.valueCentavos / 100)}</td><td data-label="Threshold">${number.format(row.threshold)} ${escapeHtml(row.unit)}</td><td data-label="Status">${statusPill(row.status)}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel report-movement-table"><div class="panel-heading"><div><p class="eyebrow">Purchasing</p><h3>Stock movements in selected range</h3></div></div><div class="table-scroll"><table><thead><tr><th>Date</th><th>Material</th><th>Quantity</th><th>Purchase cost</th><th>Note</th></tr></thead><tbody>${inventory.movements.length ? inventory.movements.map((row) => `<tr><td data-label="Date">${formatDate(row.date)}</td><td data-label="Material"><strong>${escapeHtml(row.name)}</strong></td><td data-label="Quantity">+${number.format(row.quantity)} ${escapeHtml(row.unit)}</td><td data-label="Purchase cost">${row.totalCostCentavos === null ? "Uncosted" : money.format(row.totalCostCentavos / 100)}</td><td data-label="Note">${escapeHtml(row.note || "—")}</td></tr>`).join("") : `<tr><td colspan="5">${emptyState("Truck", "No stock movements in range", "Costed supplier deliveries will appear here.")}</td></tr>`}</tbody></table></div></article><div class="report-grid inventory-report-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Consumption</p><h3>Ingredient usage</h3></div></div>${inventory.usage.length ? inventory.usage.map((row) => `<div class="report-line"><span>${escapeHtml(row.name)}</span><strong>${number.format(row.quantity)} ${escapeHtml(row.unit)}</strong></div>`).join("") : emptyState("Coffee", "No ingredient usage", "Completed recipe sales will appear here.")}</article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">History</p><h3>Low-stock alerts</h3></div></div>${inventory.alerts.length ? inventory.alerts.slice(0, 12).map((row) => `<div class="report-line"><span>${escapeHtml(row.name)}<small>${escapeHtml(formatDateTime(row.createdAt))}</small></span>${statusPill(row.resolvedAt ? "Resolved" : "Active")}</div>`).join("") : emptyState("CircleCheck", "No alerts in range", "Low-stock history will appear here.")}</article></div>`;
+  return `<section class="page-section">${pageHeading("Performance", ui.reportTab === "sales" ? "Sales report" : "Inventory report", "Metrics and exports are calculated from authoritative SQL transactions")}${tabs}
     <div class="report-toolbar" aria-label="Report date range"><label><span>From</span><input id="report-from" type="date" value="${ui.reportRange.from}" /></label><span aria-hidden="true">to</span><label><span>To</span><input id="report-to" type="date" value="${ui.reportRange.to}" /></label><button class="button primary" data-action="generate-report" ${ui.reportLoading ? "disabled" : ""}>${ui.reportLoading ? icon("LoaderCircle", "spin") : icon("Download")} Generate report</button></div>
-    ${ui.reportLoading ? `<div class="route-loading">${icon("LoaderCircle", "spin")}<p>Calculating report…</p></div>` : !report ? emptyState("BarChart3", "Report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Total sales", money.format((summary?.totalSalesCentavos ?? 0) / 100), "Completed revenue", "BarChart3", "accent")}${metric("Transactions", String(summary?.totalTransactions ?? 0), "Completed orders", "CircleCheck", "success")}${metric("Average sale", money.format((summary?.averageSaleCentavos ?? 0) / 100), "Per completed order", "Receipt")}</div><div class="report-grid"><article class="panel report-chart"><div class="panel-heading"><div><p class="eyebrow">Sales over time</p><h3>Daily revenue</h3></div></div>${revenueBars(report.daily)}</article><article class="panel report-ranking"><div class="panel-heading"><div><p class="eyebrow">Product mix</p><h3>Top sellers</h3></div></div>${report.topProducts.length ? `<ol class="rank-list">${report.topProducts.slice(0, 7).map((product, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.quantity} units sold</small></div><b>${money.format(product.totalCentavos / 100)}</b></li>`).join("")}</ol>` : emptyState("Box", "No completed sales", "Product rankings will appear after the first completed order.")}</article><article class="panel payment-summary"><div class="panel-heading"><div><p class="eyebrow">Payment mix</p><h3>Payment methods</h3></div></div>${report.payments.length ? `<div class="payment-list">${report.payments.map((item) => `<div><span>${escapeHtml(item.method)}<small>${item.transactions} transaction${item.transactions === 1 ? "" : "s"}</small></span><strong>${money.format(item.totalCentavos / 100)}</strong></div>`).join("")}</div>` : emptyState("WalletCards", "No payment activity", "Payment methods will appear after the first completed order.")}</article></div>`}
+    ${ui.reportLoading ? `<div class="route-loading">${icon("LoaderCircle", "spin")}<p>Calculating report…</p></div>` : ui.reportTab === "sales" ? salesBody : inventoryBody}
   </section>`;
 }
 
@@ -619,8 +699,34 @@ function bindAdminActions(): void {
   onAction("edit-stock", (button) => openStockDialog(button.dataset.id));
   onAction("delete-stock", (button) => confirmDelete("Delete stock entry?", "The recorded quantity will be removed from current stock.", async () => { await api.deleteStock(button.dataset.id!); await completeMutation("Stock entry deleted."); }));
   onAction("sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
+  onAction("view-receipt", (button) => openReceiptDialog(button.dataset.id!));
+  onAction("shift-details", (button) => openShiftDetails(button.dataset.id!));
+  onAction("force-close-shift", (button) => openCloseShiftDialog(button.dataset.id!, true));
+  onAction("set-cost-baseline", (button) => openCostBaselineDialog(button.dataset.id!));
   onAction("generate-report", openReportExportDialog);
-  onAction("sales-csv", () => api.downloadReport("csv", ui.reportRange.from, ui.reportRange.to).catch(handleError));
+  document.querySelectorAll<HTMLButtonElement>("[data-report-tab]").forEach((button) => button.addEventListener("click", async () => {
+    ui.reportTab = button.dataset.reportTab as ReportTab;
+    await loadReport();
+  }));
+  const applyCashFilters = (): void => {
+    const from = document.querySelector<HTMLInputElement>("#cash-from")?.value ?? ui.cashFilters.from;
+    const to = document.querySelector<HTMLInputElement>("#cash-to")?.value ?? ui.cashFilters.to;
+    if (from > to) { toast("The cash filter start date must be on or before the end date.", "error"); return; }
+    ui.cashFilters = {
+      from,
+      to,
+      status: (document.querySelector<HTMLSelectElement>("#cash-status")?.value ?? "all") as UiState["cashFilters"]["status"],
+      cashier: document.querySelector<HTMLInputElement>("#cash-cashier")?.value.trim() ?? "",
+    };
+    renderAdmin();
+  };
+  document.querySelectorAll<HTMLInputElement | HTMLSelectElement>("#cash-from,#cash-to,#cash-status").forEach((input) => input.addEventListener("change", applyCashFilters));
+  document.querySelector<HTMLInputElement>("#cash-cashier")?.addEventListener("input", (event) => {
+    ui.cashFilters.cashier = (event.currentTarget as HTMLInputElement).value;
+    renderAdmin();
+    const input = document.querySelector<HTMLInputElement>("#cash-cashier");
+    input?.focus(); input?.setSelectionRange(input.value.length, input.value.length);
+  });
   document.querySelectorAll<HTMLInputElement>("#report-from,#report-to").forEach((input) => input.addEventListener("change", async () => {
     const from = document.querySelector<HTMLInputElement>("#report-from")!.value;
     const to = document.querySelector<HTMLInputElement>("#report-to")!.value;
@@ -647,8 +753,8 @@ function bindFilters(): void {
 
 async function loadReport(): Promise<void> {
   ui.reportLoading = true; renderAdmin();
-  try { ui.report = await api.report(ui.reportRange.from, ui.reportRange.to); }
-  catch (error) { ui.report = null; toast(errorMessage(error), "error"); }
+  try { if (ui.reportTab === "sales") ui.report = await api.report(ui.reportRange.from, ui.reportRange.to); else ui.inventoryReport = await api.inventoryReport(ui.reportRange.from, ui.reportRange.to); }
+  catch (error) { if (ui.reportTab === "sales") ui.report = null; else ui.inventoryReport = null; toast(errorMessage(error), "error"); }
   finally { ui.reportLoading = false; renderAdmin(); }
 }
 
@@ -661,7 +767,7 @@ function renderStaff(): void {
 
 function staffBottomNav(): string {
   const item = (view: StaffView, iconName: string, label: string) => `<button data-staff-view="${view}" class="${ui.staffView === view ? "active" : ""}">${icon(iconName)}<span>${label}</span></button>`;
-  return `<nav class="staff-nav">${item("dashboard", "LayoutDashboard", "Home")}${item("orders", "Receipt", "Orders")}${item("products", "Coffee", "Products")}${item("inventory", "Box", "Inventory")}${item("account", "UserRound", "Account")}</nav>`;
+  return `<nav class="staff-nav">${item("dashboard", "LayoutDashboard", "Home")}${item("orders", "Receipt", "Orders")}${item("products", "Coffee", "Products")}${item("cash", "WalletCards", "Cash")}${item("inventory", "Box", "Inventory")}${item("account", "UserRound", "Account")}</nav>`;
 }
 
 function renderStaffView(): string {
@@ -672,6 +778,7 @@ function renderStaffView(): string {
   if (ui.staffView === "success") return renderSuccess();
   if (ui.staffView === "orders") return renderStaffOrders();
   if (ui.staffView === "inventory") return renderStaffInventory();
+  if (ui.staffView === "cash") return renderStaffCash();
   return renderStaffAccount();
 }
 
@@ -681,7 +788,19 @@ function renderStaffDashboard(): string {
   return `<div class="staff-screen"><div class="staff-heading"><p>${formatDate(manilaDate())}</p><h1>Today’s overview</h1></div><div class="staff-metrics">${metric("Sales today", money.format(todaySales.reduce((sum, sale) => sum + saleTotal(sale), 0)), "Completed revenue", "BarChart3")}${metric("Transactions", String(todaySales.length), "Completed today", "Receipt")}${metric("Low stock", String(alerts.length), "Items need attention", "CircleAlert", alerts.length ? "warning" : "success")}</div><h2 class="section-title">Quick actions</h2><div class="staff-quick"><button data-staff-view="products">${icon("Plus")}<strong>New order</strong></button><button data-staff-view="orders">${icon("Receipt")}<strong>Orders</strong></button><button data-staff-view="inventory">${icon("Box")}<strong>Inventory</strong></button></div>${ui.data.products.length ? "" : `<div class="staff-empty-note">${icon("CircleAlert")}<div><strong>The catalog is empty</strong><p>An administrator must create categories and products before orders can be taken.</p></div></div>`}</div>`;
 }
 
+function currentCashShift(): CashShift | null {
+  return ui.data.cashShifts.find((shift) => shift.status === "Open" && shift.openedBy === ui.session?.id) ?? null;
+}
+
+function renderStaffCash(): string {
+  const shift = currentCashShift();
+  if (!shift) return `<div class="staff-screen cash-screen"><div class="staff-heading"><p>Cash drawer</p><h1>Open cashier shift</h1></div><article class="panel cash-gate">${icon("WalletCards")}<h2>No open shift</h2><p>Enter the starting drawer balance before accepting any POS payment.</p><button class="button primary" data-action="open-shift">Open shift</button></article></div>`;
+  const movements = ui.data.cashMovements.filter((movement) => movement.shiftId === shift.id);
+  return `<div class="staff-screen cash-screen"><div class="staff-heading row"><div><p>Opened ${escapeHtml(formatDateTime(shift.openedAt))}</p><h1>Cash drawer</h1></div>${statusPill("Open")}</div><div class="staff-metrics cash-metrics">${metric("Expected cash", money.format(shift.expectedCash), "Current drawer", "WalletCards", "accent")}${metric("Cash sales", money.format(shift.cashSales), "Completed cash orders", "Receipt")}${metric("Digital sales", money.format(shift.digitalSales), "GCash and Maya", "WalletCards")}</div><article class="panel cash-summary"><div class="report-line"><span>Opening balance</span><strong>${money.format(shift.openingBalance)}</strong></div><div class="report-line"><span>Cash in</span><strong>${money.format(shift.cashIn)}</strong></div><div class="report-line"><span>Cash out</span><strong>−${money.format(shift.cashOut)}</strong></div><div class="cash-actions"><button class="button secondary" data-action="cash-movement" data-type="Cash In">Cash in</button><button class="button secondary" data-action="cash-movement" data-type="Cash Out">Cash out</button><button class="button primary" data-action="close-shift">Close shift</button></div></article><h2 class="section-title">Drawer activity</h2><div class="mobile-order-list">${movements.length ? movements.map((movement) => `<article><div><strong>${escapeHtml(movement.type)}</strong><small>${escapeHtml(movement.reason)} · ${escapeHtml(formatDateTime(movement.createdAt))}</small></div><span>${movement.type === "Cash Out" ? "−" : "+"}${money.format(movement.amount)}</span></article>`).join("") : emptyState("WalletCards", "No cash movements", "Cash-in and cash-out entries will appear here.")}</div></div>`;
+}
+
 function renderStaffProducts(): string {
+  if (!currentCashShift()) return `<div class="staff-screen cash-screen"><div class="staff-heading"><p>Point of sale</p><h1>Shift required</h1></div><article class="panel cash-gate">${icon("WalletCards")}<h2>Open your cashier shift first</h2><p>Every Cash, GCash, and Maya order must belong to an auditable shift.</p><button class="button primary" data-staff-view="cash">Go to Cash</button></article></div>`;
   const allProducts = finishedProducts();
   const categories = ui.data.categories.filter((category) => allProducts.some((product) => product.categoryId === category.id));
   const products = allProducts.filter((product) => (ui.posCategory === "all" || product.categoryId === ui.posCategory) && product.name.toLowerCase().includes(ui.posSearch.toLowerCase()));
@@ -695,20 +814,28 @@ function renderCart(): string {
 }
 
 function renderPayment(): string {
-  return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(cartTotal())}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div><div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment ? "" : "disabled"}>Confirm payment</button></div></article></div>`;
+  const total = cartTotal();
+  const received = ui.cashReceived ?? 0;
+  const cashValid = ui.selectedPayment !== "Cash" || received + Number.EPSILON >= total;
+  const cashFields = ui.selectedPayment === "Cash" ? `<div class="cash-payment-fields"><label class="field"><span>Cash received (PHP)</span><input id="cash-received" type="number" min="${total.toFixed(2)}" step="0.01" value="${ui.cashReceived ?? ""}" inputmode="decimal" required /></label><div><span>Change</span><strong>${money.format(Math.max(0, received - total))}</strong></div><div class="cash-quick"><button type="button" data-cash-amount="${total}">Exact</button>${[100, 200, 500, 1000].filter((amount) => amount >= total).map((amount) => `<button type="button" data-cash-amount="${amount}">₱${amount}</button>`).join("")}</div></div>` : "";
+  return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(total)}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div>${cashFields}<div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment && cashValid ? "" : "disabled"}>Confirm payment</button></div></article></div>`;
 }
 
 function paymentOption(method: PaymentMethod, logo: string): string {
   return `<button data-payment="${method}" class="${ui.selectedPayment === method ? "selected" : ""}"><img src="${logo}" alt="" /><strong>${method}</strong>${ui.selectedPayment === method ? icon("Check") : ""}</button>`;
 }
 
+function receiptMarkup(sale: Sale): string {
+  return `<article class="receipt-card print-receipt" data-print-receipt><header><img src="${logoUrl}" alt="Halara Coffee Club" /><strong>HALARA COFFEE CLUB</strong><small>Official sales receipt</small></header>${sale.status === "Cancelled" ? '<div class="receipt-cancelled">CANCELLED</div>' : ""}<div><span>Receipt</span><strong>${escapeHtml(sale.receipt)}</strong></div><div><span>Date / time</span><strong>${escapeHtml(formatDateTime(sale.createdAt))}</strong></div><div><span>Cashier</span><strong>${escapeHtml(sale.cashierName)}</strong></div><section class="receipt-items">${sale.items.map((item) => `<div><span><b>${item.quantity} × ${escapeHtml(item.name)}</b><small>${money.format(item.unitPrice)} each</small></span><strong>${money.format(item.quantity * item.unitPrice)}</strong></div>`).join("")}</section><div class="receipt-total"><span>Total</span><strong>${money.format(saleTotal(sale))}</strong></div><div><span>Payment</span><strong>${escapeHtml(sale.payment)}</strong></div>${sale.payment === "Cash" ? `<div><span>Cash received</span><strong>${money.format(sale.cashReceived ?? sale.total)}</strong></div><div><span>Change</span><strong>${money.format(sale.change ?? 0)}</strong></div>` : ""}<footer>Thank you for visiting Halara Coffee Club.</footer></article>`;
+}
+
 function renderSuccess(): string {
   const sale = ui.completedSale;
-  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><article class="receipt-card"><div><span>Transaction</span><strong>${escapeHtml(sale?.receipt ?? "—")}</strong></div><div><span>Date</span><strong>${sale ? formatDate(sale.date) : "—"}</strong></div><div><span>Cashier</span><strong>${escapeHtml(ui.session!.displayName)}</strong></div><div><span>Payment</span><strong>${escapeHtml(sale?.payment ?? "—")}</strong></div><div class="receipt-total"><span>Total amount</span><strong>${money.format(sale ? saleTotal(sale) : 0)}</strong></div></article><div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
+  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
 }
 
 function renderStaffOrders(): string {
-  return `<div class="staff-screen"><div class="staff-heading"><p>Transactions</p><h1>Orders</h1></div><div class="mobile-order-list">${ui.data.sales.length ? ui.data.sales.map((sale) => `<article><div><strong>${escapeHtml(sale.receipt)}</strong><small>${formatDate(sale.date)} · ${escapeHtml(sale.payment)}</small></div><span>${money.format(saleTotal(sale))}</span>${statusPill(sale.status)}<button data-action="staff-sale-status" data-id="${sale.id}" data-status="${sale.status === "Completed" ? "Cancelled" : "Completed"}">${sale.status === "Completed" ? "Refund" : "Restore"}</button></article>`).join("") : emptyState("Receipt", "No orders", "Completed customer orders will appear here.")}</div></div>`;
+  return `<div class="staff-screen"><div class="staff-heading"><p>Transactions</p><h1>Orders</h1></div><div class="mobile-order-list">${ui.data.sales.length ? ui.data.sales.map((sale) => `<article><div><strong>${escapeHtml(sale.receipt)}</strong><small>${formatDate(sale.date)} · ${escapeHtml(sale.payment)}</small></div><span>${money.format(saleTotal(sale))}</span>${statusPill(sale.status)}<div class="row-actions"><button data-action="view-receipt" data-id="${sale.id}">Receipt</button><button data-action="staff-sale-status" data-id="${sale.id}" data-status="${sale.status === "Completed" ? "Cancelled" : "Completed"}" ${canChangeSaleStatus(sale) ? "" : `disabled title="${saleStatusLocked(sale) ? "Closed-shift cash receipts are immutable" : "Only the originating cashier can change this sale"}"`}>${saleStatusLocked(sale) ? "Reconciled" : sale.createdBy !== ui.session?.id ? "Other cashier" : sale.status === "Completed" ? "Refund" : "Restore"}</button></div></article>`).join("") : emptyState("Receipt", "No orders", "Completed customer orders will appear here.")}</div></div>`;
 }
 
 function renderStaffInventory(): string {
@@ -727,15 +854,21 @@ function bindStaff(): void {
     if (view === "payment" && !ui.cart.length) return;
     navigateStaff(view);
   }));
-  document.querySelectorAll<HTMLButtonElement>("[data-payment]").forEach((button) => button.addEventListener("click", () => { ui.selectedPayment = button.dataset.payment as PaymentMethod; persistPosState(); renderStaff(); }));
+  document.querySelectorAll<HTMLButtonElement>("[data-payment]").forEach((button) => button.addEventListener("click", () => { ui.selectedPayment = button.dataset.payment as PaymentMethod; if (ui.selectedPayment !== "Cash") ui.cashReceived = null; persistPosState(); renderStaff(); }));
+  document.querySelector<HTMLInputElement>("#cash-received")?.addEventListener("input", (event) => { ui.cashReceived = Number((event.currentTarget as HTMLInputElement).value); persistPosState(); renderStaff(); document.querySelector<HTMLInputElement>("#cash-received")?.focus(); });
+  document.querySelectorAll<HTMLButtonElement>("[data-cash-amount]").forEach((button) => button.addEventListener("click", () => { ui.cashReceived = Number(button.dataset.cashAmount); persistPosState(); renderStaff(); }));
   onAction("add-cart", (button) => addToCart(button.dataset.id!));
   onAction("cart-minus", (button) => changeCart(button.dataset.id!, -1));
   onAction("cart-plus", (button) => changeCart(button.dataset.id!, 1));
-  onAction("clear-cart", () => { ui.cart = []; ui.selectedPayment = null; persistPosState(); renderStaff(); });
+  onAction("clear-cart", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; persistPosState(); renderStaff(); });
   onAction("confirm-payment", confirmPayment);
   onAction("print", () => window.print());
-  onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
+  onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
   onAction("staff-sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
+  onAction("view-receipt", (button) => openReceiptDialog(button.dataset.id!));
+  onAction("open-shift", openShiftDialog);
+  onAction("cash-movement", (button) => openCashMovementDialog(button.dataset.type as "Cash In" | "Cash Out"));
+  onAction("close-shift", () => { const shift = currentCashShift(); if (shift) openCloseShiftDialog(shift.id, false); });
   document.querySelectorAll<HTMLButtonElement>("[data-pos-category]").forEach((button) => button.addEventListener("click", () => { ui.posCategory = button.dataset.posCategory ?? "all"; renderStaff(); }));
   document.querySelector<HTMLInputElement>("#pos-search")?.addEventListener("input", (event) => { ui.posSearch = (event.currentTarget as HTMLInputElement).value; renderStaff(); document.querySelector<HTMLInputElement>("#pos-search")?.focus(); });
   bindPasswordForm("#staff-password-form");
@@ -802,6 +935,7 @@ function addToCart(productId: string): void {
   else nextCart.push({ productId, quantity: 1 });
   if (!cartIngredientsAvailable(nextCart)) { toast("There are not enough recipe ingredients for another serving.", "error"); return; }
   ui.cart = nextCart;
+  ui.paymentReference = null;
   persistPosState();
   renderStaff(); toast(`${product.name} added to the order.`, "success");
 }
@@ -817,6 +951,7 @@ function changeCart(productId: string, change: number): void {
     if (cartIngredientsAvailable(nextCart)) ui.cart = nextCart;
     else toast("There are not enough recipe ingredients for another serving.", "error");
   }
+  ui.paymentReference = null;
   persistPosState();
   renderStaff();
 }
@@ -841,12 +976,21 @@ function cartIngredientsAvailable(cart: CartItem[]): boolean {
 
 async function confirmPayment(button: HTMLButtonElement): Promise<void> {
   if (!ui.selectedPayment || !ui.cart.length) return;
+  if (!currentCashShift()) { toast("Open a cashier shift before processing a sale.", "error"); navigateStaff("cash"); return; }
+  if (ui.selectedPayment === "Cash" && (ui.cashReceived === null || ui.cashReceived + Number.EPSILON < cartTotal())) { toast("Cash received must cover the order total.", "error"); return; }
   setButtonBusy(button, true, "Saving payment");
-  const result = await api.createSale(ui.selectedPayment, ui.cart);
-  await refreshAll(false);
-  ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
+  ui.paymentReference ??= crypto.randomUUID();
   persistPosState();
-  navigateStaff("success");
+  try {
+    const result = await api.createSale(ui.selectedPayment, ui.cart, ui.selectedPayment === "Cash" ? ui.cashReceived : null, ui.paymentReference);
+    await refreshAll(false);
+    ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
+    persistPosState();
+    navigateStaff("success");
+  } catch (error) {
+    setButtonBusy(button, false, "Confirm payment");
+    throw error;
+  }
 }
 
 function openCategoryDialog(id?: string): void {
@@ -864,6 +1008,110 @@ function bindImagePreview(): void {
   });
 }
 
+function openReceiptDialog(id: string): void {
+  const sale = ui.data.sales.find((item) => item.id === id);
+  if (!sale) { toast("Receipt could not be found.", "error"); return; }
+  openDialog({
+    title: `Receipt ${sale.receipt}`,
+    description: "Itemized 80mm thermal receipt preview",
+    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div><button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button>`,
+    submitLabel: "Close",
+    hideSubmit: true,
+    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", () => window.print()),
+    onSubmit: async () => undefined,
+  });
+}
+
+function openShiftDialog(): void {
+  if (currentCashShift()) { toast("You already have an open cashier shift.", "info"); return; }
+  openDialog({
+    title: "Open cashier shift",
+    description: "Enter the physical cash already inside the drawer.",
+    body: `<label class="field"><span>Opening cash balance (PHP)</span><input name="openingBalance" type="number" min="0" step="0.01" value="0.00" inputmode="decimal" required autofocus /></label>`,
+    submitLabel: "Open shift",
+    onSubmit: async (form) => {
+      const openingBalance = Number(new FormData(form).get("openingBalance"));
+      if (!Number.isFinite(openingBalance) || openingBalance < 0) throw new Error("Enter a valid opening balance.");
+      await api.openCashShift(openingBalance);
+      await completeMutation("Cashier shift opened.");
+      navigateStaff("cash");
+    },
+  });
+}
+
+function openCashMovementDialog(type: "Cash In" | "Cash Out"): void {
+  const shift = currentCashShift();
+  if (!shift) { toast("Open a cashier shift first.", "error"); return; }
+  openDialog({
+    title: type,
+    description: type === "Cash In" ? "Record non-sale cash placed into the drawer." : "Record non-sale cash removed from the drawer.",
+    body: `<label class="field"><span>Amount (PHP)</span><input name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" required autofocus /></label><label class="field"><span>Reason</span><textarea name="reason" rows="3" minlength="3" maxlength="160" required placeholder="Required audit reason"></textarea></label>`,
+    submitLabel: `Record ${type.toLowerCase()}`,
+    onSubmit: async (form) => {
+      const data = new FormData(form);
+      const amount = Number(data.get("amount"));
+      const reason = String(data.get("reason") ?? "").trim();
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Amount must be greater than zero.");
+      if (reason.length < 3) throw new Error("Enter a clear reason for this cash movement.");
+      await api.recordCashMovement(shift.id, type, amount, reason);
+      await completeMutation(`${type} recorded.`);
+    },
+  });
+}
+
+function openCloseShiftDialog(id: string, force: boolean): void {
+  const shift = ui.data.cashShifts.find((item) => item.id === id);
+  if (!shift || shift.status !== "Open") { toast("This cashier shift is no longer open.", "error"); return; }
+  openDialog({
+    title: force ? "Force-close cashier shift" : "Close cashier shift",
+    description: `Expected drawer: ${money.format(shift.expectedCash)}. Enter the single physical cash count.`,
+    destructive: force,
+    body: `<div class="cash-reconcile-preview"><span>Expected cash</span><strong>${money.format(shift.expectedCash)}</strong></div><label class="field"><span>Counted cash (PHP)</span><input name="countedCash" type="number" min="0" step="0.01" inputmode="decimal" required autofocus /></label><label class="field"><span>Closing note${force ? " (required)" : ""}</span><textarea name="note" rows="3" maxlength="300" ${force ? "minlength=3 required" : ""} placeholder="${force ? "Explain why this shift is being force-closed" : "Optional handover or reconciliation note"}"></textarea></label>`,
+    submitLabel: force ? "Force close" : "Close shift",
+    onSubmit: async (form) => {
+      const data = new FormData(form);
+      const countedCash = Number(data.get("countedCash"));
+      const note = String(data.get("note") ?? "").trim();
+      if (!Number.isFinite(countedCash) || countedCash < 0) throw new Error("Enter a valid counted cash total.");
+      if (force && note.length < 3) throw new Error("A force-close note is required.");
+      if (force) await api.forceCloseCashShift(id, countedCash, note); else await api.closeCashShift(id, countedCash, note);
+      await completeMutation(force ? "Cashier shift force-closed." : "Cashier shift closed and reconciled.");
+    },
+  });
+}
+
+function openShiftDetails(id: string): void {
+  const shift = ui.data.cashShifts.find((item) => item.id === id);
+  if (!shift) return;
+  const movements = ui.data.cashMovements.filter((item) => item.shiftId === id);
+  openDialog({
+    title: `${shift.cashierName} · ${shift.status} shift`,
+    description: `Opened ${formatDateTime(shift.openedAt)}${shift.closedAt ? ` · Closed ${formatDateTime(shift.closedAt)}` : ""}`,
+    wide: true,
+    body: `<div class="shift-detail-grid"><div><span>Opening balance</span><strong>${money.format(shift.openingBalance)}</strong></div><div><span>Cash sales</span><strong>${money.format(shift.cashSales)}</strong></div><div><span>Digital sales</span><strong>${money.format(shift.digitalSales)}</strong></div><div><span>Cash in / out</span><strong>${money.format(shift.cashIn)} / ${money.format(shift.cashOut)}</strong></div><div><span>Expected drawer</span><strong>${money.format(shift.expectedCash)}</strong></div><div><span>Counted / variance</span><strong>${shift.countedCash === null ? "—" : `${money.format(shift.countedCash)} / ${money.format(shift.variance ?? 0)}`}</strong></div></div>${shift.closingNote ? `<div class="closing-note"><strong>Closing note</strong><p>${escapeHtml(shift.closingNote)}</p></div>` : ""}<h3 class="dialog-section-title">Cash movements</h3><div class="dialog-list">${movements.length ? movements.map((movement) => `<div><span><strong>${escapeHtml(movement.type)}</strong><small>${escapeHtml(movement.reason)} · ${escapeHtml(formatDateTime(movement.createdAt))}</small></span><b>${movement.type === "Cash Out" ? "−" : "+"}${money.format(movement.amount)}</b></div>`).join("") : `<p>No cash-in or cash-out entries.</p>`}</div>`,
+    submitLabel: "Close",
+    hideSubmit: true,
+    onSubmit: async () => undefined,
+  });
+}
+
+function openCostBaselineDialog(id: string): void {
+  const product = rawMaterials().find((item) => item.id === id);
+  if (!product) return;
+  openDialog({
+    title: `Set starting cost · ${product.name}`,
+    description: `Current quantity: ${number.format(product.currentStock)} ${product.unit}. This one-time baseline values legacy stock.`,
+    body: `<label class="field"><span>Cost per ${escapeHtml(product.unit)} (PHP)</span><input name="unitCost" type="number" min="0" step="0.0001" inputmode="decimal" required autofocus /></label><div class="inventory-scope-note">${icon("Info")}<span><strong>This baseline cannot be replaced from the interface.</strong><small>Future costed stock entries will update the weighted-average unit cost.</small></span></div>`,
+    submitLabel: "Set starting cost",
+    onSubmit: async (form) => {
+      const unitCost = Number(new FormData(form).get("unitCost"));
+      if (!Number.isFinite(unitCost) || unitCost <= 0) throw new Error("Unit cost must be greater than zero.");
+      await api.setMaterialCostBaseline(id, unitCost);
+      await completeMutation("Starting inventory cost saved.");
+    },
+  });
+}
+
 function openSaleStatusDialog(id: string, status: SaleStatus): void {
   const sale = ui.data.sales.find((item) => item.id === id);
   if (!sale) return;
@@ -872,20 +1120,22 @@ function openSaleStatusDialog(id: string, status: SaleStatus): void {
 }
 
 function openReportExportDialog(): void {
-  openDialog({ title: "Generate sales report", description: `${formatDate(ui.reportRange.from)} to ${formatDate(ui.reportRange.to)}`, body: `<div class="export-options"><button type="button" data-format="pdf">${icon("FileText")}<span><strong>PDF report</strong><small>Printable metrics, rankings, payments and transactions</small></span></button><button type="button" data-format="csv">${icon("Download")}<span><strong>CSV export</strong><small>Spreadsheet-ready transaction and line-item details</small></span></button></div>`, submitLabel: "Close", hideSubmit: true, onOpen: () => { document.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((button) => button.addEventListener("click", async () => { setButtonBusy(button, true, `Creating ${button.dataset.format?.toUpperCase()}`); try { await api.downloadReport(button.dataset.format as "pdf" | "csv", ui.reportRange.from, ui.reportRange.to); toast("Report generated.", "success"); closeDialog(); } catch (error) { setDialogError(errorMessage(error)); setButtonBusy(button, false, button.dataset.format === "pdf" ? "PDF report" : "CSV export"); } })); }, onSubmit: async () => undefined });
+  const inventory = ui.reportTab === "inventory";
+  openDialog({ title: `Generate ${inventory ? "inventory" : "sales"} report`, description: `${formatDate(ui.reportRange.from)} to ${formatDate(ui.reportRange.to)}`, body: `<div class="export-options"><button type="button" data-format="pdf">${icon("FileText")}<span><strong>PDF report</strong><small>${inventory ? "Current valuation, movements, consumption and alert history" : "Printable metrics, rankings, payments and transactions"}</small></span></button><button type="button" data-format="csv">${icon("Download")}<span><strong>CSV export</strong><small>${inventory ? "Sectioned inventory data ready for spreadsheet review" : "Spreadsheet-ready transaction and line-item details"}</small></span></button></div>`, submitLabel: "Close", hideSubmit: true, onOpen: () => { document.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((button) => button.addEventListener("click", async () => { setButtonBusy(button, true, `Creating ${button.dataset.format?.toUpperCase()}`); try { if (inventory) await api.downloadInventoryReport(button.dataset.format as "pdf" | "csv", ui.reportRange.from, ui.reportRange.to); else await api.downloadReport(button.dataset.format as "pdf" | "csv", ui.reportRange.from, ui.reportRange.to); toast("Report generated.", "success"); closeDialog(); } catch (error) { setDialogError(errorMessage(error)); setButtonBusy(button, false, button.dataset.format === "pdf" ? "PDF report" : "CSV export"); } })); }, onSubmit: async () => undefined });
 }
 
 function renderNotificationPopover(): string {
   const unreadLabel = `${ui.unread} unread notification${ui.unread === 1 ? "" : "s"}`;
   const items = ui.notifications.length
-    ? ui.notifications.map((item) => `<button type="button" data-action="open-notification" data-notification-id="${escapeHtml(item.id)}" class="notification-popover-item ${item.isRead ? "" : "unread"}"><i class="${item.severity}">${icon(item.severity === "danger" ? "CircleAlert" : "Bell")}</i><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}</small><time>${escapeHtml(item.createdAt.replace("T", " ").slice(0, 16))}${item.active ? "" : " · Resolved"}</time></span>${item.isRead ? icon("Check") : '<b aria-hidden="true"></b>'}</button>`).join("")
+    ? ui.notifications.map((item) => `<button type="button" data-action="open-notification" data-notification-id="${escapeHtml(item.id)}" class="notification-popover-item ${item.isRead ? "" : "unread"}"><i class="${item.severity}">${icon(item.severity === "danger" ? "CircleAlert" : "Bell")}</i><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}</small><time>${escapeHtml(formatDateTime(item.createdAt))}${item.active ? "" : " · Resolved"}</time></span>${item.isRead ? icon("Check") : '<b aria-hidden="true"></b>'}</button>`).join("")
     : `<div class="notification-popover-empty">${icon("Bell")}<strong>No notifications</strong><span>Inventory alerts will appear here.</span></div>`;
-  return `<section class="notification-popover" role="dialog" aria-label="Notifications"><header><div><p class="eyebrow">Notifications</p><h2>Notifications</h2><span>${unreadLabel}</span></div><div class="notification-popover-actions"><button type="button" data-action="mark-all-notifications" ${ui.unread ? "" : "disabled"}>${icon("Check")} Mark all read</button><button type="button" data-action="close-notifications" aria-label="Close notifications">${icon("X")}</button></div></header><div class="notification-popover-list">${items}</div><footer><button type="button" data-action="close-notifications">View all notifications</button><button type="button" data-action="mark-all-notifications" ${ui.unread ? "" : "disabled"}>${icon("Check")} Mark all read</button></footer></section>`;
+  return `<section class="notification-popover" role="dialog" aria-modal="false" aria-label="Notifications"><header><div><p class="eyebrow">Alerts</p><h2>Notifications</h2><span>${unreadLabel}</span></div><div class="notification-popover-actions"><button type="button" data-action="close-notifications" aria-label="Close notifications">${icon("X")}</button></div></header><div class="notification-popover-list">${items}</div><footer><button type="button" data-action="mark-all-notifications" ${ui.unread ? "" : "disabled"}>${icon("Check")} Mark all read</button></footer></section>`;
 }
 
-function toggleNotifications(): void {
+function toggleNotifications(button?: HTMLButtonElement): void {
   const wrap = document.querySelector<HTMLElement>(".notification-wrap");
   if (!wrap) return;
+  notificationTrigger = button ?? wrap.querySelector<HTMLButtonElement>(".notification-button");
   ui.notificationsOpen = !ui.notificationsOpen;
   ui.accountOpen = false;
   document.querySelector("#account-menu")?.classList.remove("show");
@@ -895,16 +1145,18 @@ function toggleNotifications(): void {
   wrap.insertAdjacentHTML("beforeend", renderNotificationPopover());
   hydrate(wrap);
   bindNotificationPopover(wrap);
+  window.setTimeout(() => wrap.querySelector<HTMLButtonElement>('[data-action="close-notifications"]')?.focus(), 0);
 }
 
-function closeNotifications(): void {
+function closeNotifications(restoreFocus = true): void {
   ui.notificationsOpen = false;
   document.querySelector(".notification-popover")?.remove();
   document.querySelector<HTMLButtonElement>(".notification-button")?.setAttribute("aria-expanded", "false");
+  if (restoreFocus) (notificationTrigger?.isConnected ? notificationTrigger : document.querySelector<HTMLButtonElement>(".notification-button"))?.focus();
 }
 
 function bindNotificationPopover(root: HTMLElement): void {
-  root.querySelectorAll<HTMLButtonElement>('[data-action="close-notifications"]').forEach((button) => button.addEventListener("click", closeNotifications));
+  root.querySelectorAll<HTMLButtonElement>('[data-action="close-notifications"]').forEach((button) => button.addEventListener("click", () => closeNotifications()));
   root.querySelectorAll<HTMLButtonElement>('[data-action="mark-all-notifications"]').forEach((button) => button.addEventListener("click", () => { void markAllNotifications(); }));
   root.querySelectorAll<HTMLButtonElement>('[data-action="open-notification"]').forEach((button) => button.addEventListener("click", () => { void openNotification(button); }));
 }
@@ -1010,18 +1262,28 @@ function bindPasswordForm(selector: string): void {
   });
 }
 
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && ui.notificationsOpen) closeNotifications();
+});
+
+document.addEventListener("click", (event) => {
+  if (!ui.notificationsOpen) return;
+  const target = event.target;
+  if (target instanceof Node && !document.querySelector(".notification-wrap")?.contains(target)) closeNotifications();
+});
+
 function openStockDialog(id?: string): void {
   const movement = ui.data.stockMovements.find((item) => item.id === id);
   const materials = rawMaterials();
   if (!materials.length) { toast("Add a raw material before recording stock.", "info"); return; }
   openDialog({
     title: movement ? "Edit stock entry" : "Add raw material stock",
-    description: "Stock changes are recorded transactionally in Supabase.",
-    body: `<label class="field"><span>Raw material</span><select name="productId" ${movement ? "disabled" : ""}>${materials.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>Quantity added</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label></div>`,
+    description: "Quantity and purchase cost update stock and weighted-average valuation transactionally.",
+    body: `<label class="field"><span>Raw material</span><select name="productId" ${movement ? "disabled" : ""}>${materials.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>Quantity added</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Total purchase cost (PHP)</span><input name="totalCost" type="number" min="0.01" step="0.01" value="${movement?.totalCost ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label></div>`,
     submitLabel: movement ? "Save changes" : "Add stock",
     onSubmit: async (form) => {
       const data = new FormData(form);
-      const body = { productId: String(data.get("productId") ?? movement?.productId), quantity: Number(data.get("quantity")), date: String(data.get("date")), note: String(data.get("note") ?? "") };
+      const body = { productId: String(data.get("productId") ?? movement?.productId), quantity: Number(data.get("quantity")), totalCost: Number(data.get("totalCost")), date: String(data.get("date")), note: String(data.get("note") ?? "") };
       if (movement) await api.updateStock(movement.id, body); else await api.createStock(body);
       await completeMutation(movement ? "Stock entry updated." : "Stock added.");
     },
@@ -1041,7 +1303,7 @@ function openProductDialog(id?: string, typeOverride?: Product["type"]): void {
   const recipeBody = recipeRows.map((recipe) => recipeIngredientRow(recipe.ingredientId, recipe.quantity, excludedIngredientId)).join("");
   const typeFields = isFinished
     ? `<input name="unit" type="hidden" value="serving" /><input name="currentStock" type="hidden" value="0" /><input name="lowStockThreshold" type="hidden" value="0" /><label class="field"><span>Unit price (PHP)</span><input name="price" type="number" min="0" step="0.01" value="${product?.price ?? 0}" required /></label><div class="inventory-scope-note wide" id="inventory-scope-note" ${tracksInventory ? "hidden" : ""}>${icon("Info")}<span><strong>Inventory tracking is disabled for this category.</strong><small>Staff can sell this item without a recipe and no raw materials will be deducted.</small></span></div><fieldset class="recipe-editor wide" id="recipe-editor-fieldset" ${tracksInventory ? "" : "hidden"}><legend>Recipe for one serving</legend><p>${availableIngredients.length ? "Quantities use each raw material's inventory unit. Leave empty to keep this item unavailable in POS." : "Add raw materials first to configure a recipe. You can still save the product details and photo now."}</p><div id="recipe-rows">${recipeBody}</div><button class="small-button" id="add-recipe-row" type="button" ${availableIngredients.length ? "" : "disabled"}>${icon("Plus")} Add ingredient</button></fieldset>`
-    : `<label class="field"><span>Inventory unit</span><input name="unit" value="${escapeHtml(product?.unit ?? "mL")}" maxlength="12" placeholder="mL, g, pcs" required /></label>${product ? `<input name="currentStock" type="hidden" value="0" /><div class="field wide stock-readonly"><span>Current stock</span><strong>${number.format(product.currentStock)} ${escapeHtml(product.unit)}</strong><small>Use Add stock in Inventory to change the on-hand quantity.</small></div>` : `<label class="field"><span>Opening stock</span><input name="currentStock" type="number" min="0" step="0.001" value="0" required /></label>`}<label class="field"><span>Low-stock threshold</span><input name="lowStockThreshold" type="number" min="0" step="0.001" value="${product?.lowStockThreshold ?? 10}" required /></label><input name="price" type="hidden" value="0" />`;
+    : `<label class="field"><span>Inventory unit</span><input name="unit" value="${escapeHtml(product?.unit ?? "mL")}" maxlength="12" placeholder="mL, g, pcs" required /></label><input name="currentStock" type="hidden" value="0" />${product ? `<div class="field wide stock-readonly"><span>Current stock</span><strong>${number.format(product.currentStock)} ${escapeHtml(product.unit)}</strong><small>Use Add stock in Inventory to change the on-hand quantity.</small></div>` : `<div class="inventory-scope-note wide">${icon("Info")}<span><strong>Opening stock is recorded after the material is created.</strong><small>Use Inventory → Add stock so the first supplier quantity always includes its purchase cost.</small></span></div>`}<label class="field"><span>Low-stock threshold</span><input name="lowStockThreshold" type="number" min="0" step="0.001" value="${product?.lowStockThreshold ?? 10}" required /></label><input name="price" type="hidden" value="0" />`;
   openDialog({
     title: product ? `Edit ${isFinished ? "finished product" : "raw material"}` : `Add ${isFinished ? "finished product" : "raw material"}`,
     description: isFinished ? "Set the sales price and ingredient quantity required for one serving." : "Stock is maintained in this unit and replenished through inventory movements.",
@@ -1115,13 +1377,15 @@ function readRecipeEditor(): Array<{ ingredientId: string; quantity: number }> {
 }
 
 async function logout(): Promise<void> {
+  intentionalLogout = true;
   try { await api.logout(); } catch { /* Clear the local UI even if the session already expired. */ }
-  window.clearInterval(notificationTimer); ui.session = null; ui.roleChoice = null; ui.data = emptyData(); ui.cart = []; ui.selectedPayment = null; ui.completedSale = null; ui.report = null; ui.posSearch = ""; ui.posCategory = "all";
+  finally { intentionalLogout = false; }
+  realtimeUnsubscribe?.(); realtimeUnsubscribe = null; window.clearTimeout(realtimeRefreshTimer); ui.session = null; ui.roleChoice = null; ui.data = emptyData(); ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; ui.completedSale = null; ui.report = null; ui.inventoryReport = null; ui.posSearch = ""; ui.posCategory = "all";
   window.sessionStorage.removeItem(posStateKey); closeDialog(); syncLocation(true); render();
 }
 
 function statusPill(status: string): string {
-  const tone = status === "Completed" || status === "Available" ? "success" : status === "Cancelled" || status === "Out of stock" ? "danger" : "warning";
+  const tone = status === "Completed" || status === "Available" || status === "Resolved" || status === "Closed" ? "success" : status === "Cancelled" || status === "Out of stock" ? "danger" : "warning";
   return `<span class="status-pill ${tone}"><i></i>${escapeHtml(status)}</span>`;
 }
 

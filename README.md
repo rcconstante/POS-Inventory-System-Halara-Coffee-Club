@@ -10,7 +10,7 @@ operations, and image storage.
 1. Open the Supabase SQL Editor for the project.
 2. Run the SQL files in `supabase/migrations` in numeric order. Existing
    installations should apply every newer numbered migration they have not yet
-   run, through `005_inventory_tracking_scope.sql`.
+   run, through `006_cash_reporting_realtime.sql`.
 3. In **Authentication → Users**, create:
    - `r.constante.dev@gmail.com` with password `Admin@12345!`
    - `staff@halara.test` with password `Staff@12345!`
@@ -42,10 +42,33 @@ Coffee, Tea Refreshers and Soda, and Add-ons can be sold without inventory
 deductions. The tracking decision is snapshotted on every sale item so cancelling
 or restoring an order remains safe even if the catalog changes later.
 
+Migration `006_cash_reporting_realtime.sql` adds cashier shifts, auditable
+cash-in/cash-out movements, tender and change snapshots, closed-drawer
+reconciliation protection, weighted-average raw-material costing, and Realtime
+publication registration. Every Cash, GCash, and Maya sale now requires the
+staff member to open a shift first. Existing cash transactions are preserved as
+legacy exact-payment sales without a shift. Apply this migration before using
+the updated frontend because the old two-argument `create_sale` RPC is removed.
+Payment submissions use a persisted client reference and a transaction-level
+lock so retries or concurrent double-submissions return the same sale instead of
+deducting inventory twice.
+
+Administrators can assign a one-time starting unit cost to uncosted current
+stock, then record the total purchase cost on every new stock entry. Inventory
+reports clearly exclude uncosted materials from the valued total. Staff can
+close and reconcile only their own drawer; administrators may inspect all
+shifts and force-close an abandoned shift with a required note.
+
+The Admin **Reports** workspace contains separate Sales and Inventory views and
+sectioned PDF/CSV exports. Staff and Admin sales history can preview and reprint
+itemized 80mm receipts. Database changes are synchronized through authenticated
+Supabase Realtime channels; the former 30-second notification polling loop is no
+longer used.
+
 ### Test-only ingredients and recipes
 
 For a test or staging database only, run
-`supabase/testing/seed_inventory_recipes.sql` after migrations 001–005. It adds
+`supabase/testing/seed_inventory_recipes.sql` after migrations 001–006. It adds
 deterministic opening stock and recipes for the default coffee, sandwich, and
 pastry menu. The quantities are testing assumptions—not the client's production
 formulations—and rerunning the file resets the named test materials and recipes.
