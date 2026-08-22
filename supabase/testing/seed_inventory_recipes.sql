@@ -1,8 +1,9 @@
 -- TEST / STAGING DATA ONLY.
--- Requires migrations 001 through 005 and the default menu from migration 003.
+-- Requires migrations 001 through 008 and the default menu from migration 003.
 -- This seed is intentionally outside supabase/migrations so it is never applied
 -- as production data. Re-running it resets only the named test materials and
--- the recipes for coffee, sandwiches, and pastries below.
+-- the recipes for coffee and sandwiches below. Pastries and Pasta are not
+-- inventory-tracked under the client's final scope clarification.
 
 begin;
 
@@ -38,25 +39,7 @@ with material(name, unit, opening_stock, low_stock_threshold) as (
     ('Ham', 'slice', 150::numeric, 15::numeric),
     ('Bacon', 'strip', 200::numeric, 20::numeric),
     ('Chicken Pastil Filling', 'g', 5000::numeric, 500::numeric),
-    ('Butter', 'g', 2000::numeric, 200::numeric),
-    ('Pastry Stock - Butter Croissant', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Creamcheese Pimiento', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Twice Baked Almond Croissant', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Twice Baked Pistachio Croissant', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Uji Matcha Croissant', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Golden Crunch', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Caradamia', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Danish Roll - Cinnamon', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Danish Roll - Ube Halaya', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - New York Roll - Red Velvet', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - New York Roll - Cookies & Cream', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - New York Roll - Belgian Almond', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Cream-Filled Croissant - Lotus Biscoff', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Cream-Filled Croissant - Nutella', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Croissant Tart - Classic', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Croissant Tart - Salted Caramel', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Cromboloni - Pistachio Kataifi', 'pcs', 10::numeric, 2::numeric),
-    ('Pastry Stock - Cromboloni - Tiramisu', 'pcs', 10::numeric, 2::numeric)
+    ('Butter', 'g', 2000::numeric, 200::numeric)
 )
 insert into public.products(
   name, category_id, product_type, tracks_inventory, unit, current_stock,
@@ -177,25 +160,7 @@ with recipe(finished_name, ingredient_name, quantity) as (
     ('Bacon & Cheese', 'Butter', 10::numeric),
     ('Grilled Chicken Pastil', 'Sliced Bread', 2::numeric),
     ('Grilled Chicken Pastil', 'Chicken Pastil Filling', 100::numeric),
-    ('Grilled Chicken Pastil', 'Butter', 10::numeric),
-    ('Butter Croissant', 'Pastry Stock - Butter Croissant', 1::numeric),
-    ('Creamcheese Pimiento', 'Pastry Stock - Creamcheese Pimiento', 1::numeric),
-    ('Twice Baked Almond Croissant', 'Pastry Stock - Twice Baked Almond Croissant', 1::numeric),
-    ('Twice Baked Pistachio Croissant', 'Pastry Stock - Twice Baked Pistachio Croissant', 1::numeric),
-    ('Uji Matcha Croissant', 'Pastry Stock - Uji Matcha Croissant', 1::numeric),
-    ('Golden Crunch', 'Pastry Stock - Golden Crunch', 1::numeric),
-    ('Caradamia', 'Pastry Stock - Caradamia', 1::numeric),
-    ('Danish Roll - Cinnamon', 'Pastry Stock - Danish Roll - Cinnamon', 1::numeric),
-    ('Danish Roll - Ube Halaya', 'Pastry Stock - Danish Roll - Ube Halaya', 1::numeric),
-    ('New York Roll - Red Velvet', 'Pastry Stock - New York Roll - Red Velvet', 1::numeric),
-    ('New York Roll - Cookies & Cream', 'Pastry Stock - New York Roll - Cookies & Cream', 1::numeric),
-    ('New York Roll - Belgian Almond', 'Pastry Stock - New York Roll - Belgian Almond', 1::numeric),
-    ('Cream-Filled Croissant - Lotus Biscoff', 'Pastry Stock - Cream-Filled Croissant - Lotus Biscoff', 1::numeric),
-    ('Cream-Filled Croissant - Nutella', 'Pastry Stock - Cream-Filled Croissant - Nutella', 1::numeric),
-    ('Croissant Tart - Classic', 'Pastry Stock - Croissant Tart - Classic', 1::numeric),
-    ('Croissant Tart - Salted Caramel', 'Pastry Stock - Croissant Tart - Salted Caramel', 1::numeric),
-    ('Cromboloni - Pistachio Kataifi', 'Pastry Stock - Cromboloni - Pistachio Kataifi', 1::numeric),
-    ('Cromboloni - Tiramisu', 'Pastry Stock - Cromboloni - Tiramisu', 1::numeric)
+    ('Grilled Chicken Pastil', 'Butter', 10::numeric)
 )
 insert into public.product_recipes(finished_product_id, ingredient_id, quantity)
 select finished.id, ingredient.id, recipe.quantity
@@ -219,17 +184,18 @@ begin
   select count(*) into v_material_count
   from public.products
   where category_id = (select id from public.categories where name = 'Raw Materials')
-    and product_type = 'raw_material';
+    and product_type = 'raw_material'
+    and active;
 
   select count(distinct finished_product_id) into v_finished_count
   from public.product_recipes recipe
   join public.products finished on finished.id = recipe.finished_product_id
   where finished.category_id in (
-    select id from public.categories where name in ('Espresso Based', 'Sandwiches', 'Pastries')
+    select id from public.categories where name in ('Espresso Based', 'Sandwiches')
   );
 
-  if v_material_count < 37 or v_finished_count <> 35 then
-    raise exception 'Test seed validation failed: expected at least 37 materials and recipes for 35 sales items, got % and %',
+  if v_material_count < 19 or v_finished_count <> 17 then
+    raise exception 'Test seed validation failed: expected at least 19 materials and recipes for 17 sales items, got % and %',
       v_material_count, v_finished_count;
   end if;
 end;

@@ -175,7 +175,7 @@ function manilaDateFromTimestamp(value: string): string {
   return Number.isNaN(date.getTime()) ? value.slice(0, 10) : manilaIsoDate.format(date);
 }
 
-const untrackedFinishedCategories = new Set(["Pasta", "Not Coffee", "Tea Refreshers and Soda", "Add-ons"]);
+const untrackedFinishedCategories = new Set(["Pastries", "Pasta"]);
 
 function categoryTracksInventory(id: string): boolean {
   return !untrackedFinishedCategories.has(categoryName(id));

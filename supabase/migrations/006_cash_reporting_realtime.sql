@@ -401,7 +401,7 @@ begin
 
   for v_item in select x.product_id, sum(x.quantity)::integer quantity from jsonb_to_recordset(p_items) x(product_id uuid, quantity integer) group by x.product_id order by x.product_id loop
     if v_item.product_id is null or v_item.quantity is null or v_item.quantity <= 0 then raise exception 'Invalid item quantity'; end if;
-    select * into v_product from public.products where products.id = v_item.product_id and active and product_type = 'finished_product' for update;
+    select product.* into v_product from public.products product where product.id = v_item.product_id and product.active and product.product_type = 'finished_product' for update;
     if not found then raise exception 'Sales item is unavailable'; end if;
     if v_product.tracks_inventory and not exists(select 1 from public.product_recipes where finished_product_id = v_product.id) then raise exception '% does not have a recipe or unit-stock mapping', v_product.name; end if;
     v_total := v_total + v_product.price_centavos * v_item.quantity;
@@ -421,7 +421,7 @@ begin
     join public.product_recipes recipe on recipe.finished_product_id = order_items.product_id
     group by recipe.ingredient_id order by recipe.ingredient_id
   loop
-    select * into v_product from public.products where id = v_item.ingredient_id and active and product_type = 'raw_material' for update;
+    select ingredient.* into v_product from public.products ingredient where ingredient.id = v_item.ingredient_id and ingredient.active and ingredient.product_type = 'raw_material' for update;
     if not found then raise exception 'A recipe ingredient is unavailable'; end if;
     v_required := round(v_item.required, 3);
     if v_product.current_stock < v_required then raise exception '% only has % % remaining; % % is required', v_product.name, v_product.current_stock, v_product.unit, v_required, v_product.unit; end if;
@@ -432,7 +432,7 @@ begin
     case when p_payment = 'Cash' then p_cash_received_centavos else null end, v_change, p_client_reference);
 
   for v_item in select x.product_id, sum(x.quantity)::integer quantity from jsonb_to_recordset(p_items) x(product_id uuid, quantity integer) group by x.product_id loop
-    select * into v_product from public.products where id = v_item.product_id;
+    select product.* into v_product from public.products product where product.id = v_item.product_id;
     insert into public.sale_items(sale_id, product_id, product_name, quantity, unit_price_centavos, line_total_centavos, tracks_inventory)
     values(v_id, v_product.id, v_product.name, v_item.quantity, v_product.price_centavos, v_product.price_centavos * v_item.quantity, v_product.tracks_inventory);
   end loop;
