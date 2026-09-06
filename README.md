@@ -10,7 +10,7 @@ operations, and image storage.
 1. Open the Supabase SQL Editor for the project.
 2. Run the SQL files in `supabase/migrations` in numeric order. Existing
    installations should apply every newer numbered migration they have not yet
-   run, through `008_correct_inventory_tracking_scope.sql`.
+   run, through `009_project_keepalive.sql`.
 3. In **Authentication → Users**, create:
    - `r.constante.dev@gmail.com` with password `Admin@12345!`
    - `staff@halara.test` with password `Staff@12345!`
@@ -58,6 +58,11 @@ deducting inventory twice.
 Migration `007_fix_create_sale_ambiguous_id.sql` qualifies product identifiers
 inside the payment RPC. Existing databases that already applied migration 006
 must apply migration 007 before processing another POS payment.
+
+Migration `009_project_keepalive.sql` adds a read-only RPC for the deployed
+Netlify site's scheduled keep-alive. The function returns only the database
+time, is callable with the publishable key, and cannot read or modify business
+data.
 
 Administrators can assign a one-time starting unit cost to uncosted current
 stock, then record the total purchase cost on every new stock entry. Inventory
@@ -131,6 +136,26 @@ Netlify and use the detected settings:
 Every push to the production branch triggers a new deployment. Supabase keeps
 the database, authentication records, and uploaded images independently of the
 Netlify build.
+
+### Supabase Free Plan keep-alive
+
+The published Netlify deployment runs `supabase-keepalive` once daily at
+03:17 UTC. It sends one small request to the read-only `project_keepalive` RPC
+so the database receives regular activity even when nobody opens the POS.
+
+Configure these variables in **Netlify → Project configuration → Environment
+variables** before publishing migration 009 and the scheduled function:
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+After the production deploy, open **Netlify → Functions → supabase-keepalive**
+and use **Run now** once. A successful invocation confirms both the environment
+variables and database migration are active. This reduces Free Plan inactivity
+pausing risk, but only a paid Supabase plan guarantees that a production project
+will not be paused.
 
 ## Validation
 
