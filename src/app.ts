@@ -813,11 +813,25 @@ function renderCart(): string {
   return `<div class="staff-flow"><div class="flow-header"><button data-staff-view="products">${icon("ArrowLeft")}</button><div><p>Current order</p><h1>Review items</h1></div><button data-action="clear-cart" aria-label="Clear cart">${icon("Trash2")}</button></div><div class="cart-lines">${items.length ? items.map((item) => `<article>${productVisual(item.product)}<div><strong>${escapeHtml(item.product.name)}</strong><small>${money.format(item.product.price)} each</small></div><div class="quantity"><button data-action="cart-minus" data-id="${item.product.id}">${icon("Minus")}</button><b>${item.quantity}</b><button data-action="cart-plus" data-id="${item.product.id}">${icon("Plus")}</button></div><strong>${money.format(item.product.price * item.quantity)}</strong></article>`).join("") : emptyState("ShoppingCart", "Your order is empty", "Add products to continue to payment.")}</div><div class="order-total"><span><small>Subtotal</small><strong>${money.format(cartTotal())}</strong></span><span><small>Total</small><strong>${money.format(cartTotal())}</strong></span></div><button class="button primary wide" data-staff-view="payment" ${items.length ? "" : "disabled"}>Proceed to payment</button></div>`;
 }
 
+function formatCashInputAmount(amount: number | null): string {
+  if (amount === null || amount === undefined || Number.isNaN(amount) || amount === 0) return "";
+  return amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function parseCashInputAmount(raw: string): number | null {
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  if (!cleaned) return null;
+  const parts = cleaned.split(".");
+  const sanitized = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : cleaned;
+  const num = parseFloat(sanitized);
+  return Number.isNaN(num) ? null : num;
+}
+
 function renderPayment(): string {
   const total = cartTotal();
   const received = ui.cashReceived ?? 0;
   const cashValid = ui.selectedPayment !== "Cash" || received + Number.EPSILON >= total;
-  const cashFields = ui.selectedPayment === "Cash" ? `<div class="cash-payment-fields"><label class="field"><span>Cash received (PHP)</span><input id="cash-received" type="number" min="${total.toFixed(2)}" step="0.01" value="${ui.cashReceived ?? ""}" inputmode="decimal" required /></label><div><span>Change</span><strong>${money.format(Math.max(0, received - total))}</strong></div><div class="cash-quick"><button type="button" data-cash-amount="${total}">Exact</button>${[100, 200, 500, 1000].filter((amount) => amount >= total).map((amount) => `<button type="button" data-cash-amount="${amount}">₱${amount}</button>`).join("")}</div></div>` : "";
+  const cashFields = ui.selectedPayment === "Cash" ? `<div class="cash-payment-fields"><label class="field"><span>Cash received (PHP)</span><input id="cash-received" type="text" value="${formatCashInputAmount(ui.cashReceived)}" placeholder="0.00" inputmode="decimal" autocomplete="off" required /></label><div><span>Change</span><strong id="cash-change">${money.format(Math.max(0, received - total))}</strong></div><div class="cash-quick"><button type="button" data-cash-amount="${total}">Exact</button>${[100, 200, 500, 1000, 2000, 5000].filter((amount) => amount >= total).map((amount) => `<button type="button" data-cash-amount="${amount}">${money.format(amount)}</button>`).join("")}</div></div>` : "";
   return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(total)}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div>${cashFields}<div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment && cashValid ? "" : "disabled"}>Confirm payment</button></div></article></div>`;
 }
 
@@ -825,8 +839,12 @@ function paymentOption(method: PaymentMethod, logo: string): string {
   return `<button data-payment="${method}" class="${ui.selectedPayment === method ? "selected" : ""}"><img src="${logo}" alt="" /><strong>${method}</strong>${ui.selectedPayment === method ? icon("Check") : ""}</button>`;
 }
 
+function singleReceiptCard(sale: Sale, copyLabel: string): string {
+  return `<article class="receipt-card"><header><img src="${logoUrl}" alt="Halara Coffee Club" /><strong>HALARA COFFEE CLUB</strong><small>Official Sales Receipt — ${copyLabel}</small></header>${sale.status === "Cancelled" ? '<div class="receipt-cancelled">CANCELLED</div>' : ""}<div><span>Receipt</span><strong>${escapeHtml(sale.receipt)}</strong></div><div><span>Date / time</span><strong>${escapeHtml(formatDateTime(sale.createdAt))}</strong></div><div><span>Cashier</span><strong>${escapeHtml(sale.cashierName)}</strong></div><section class="receipt-items">${sale.items.map((item) => `<div><span><b>${item.quantity} × ${escapeHtml(item.name)}</b><small>${money.format(item.unitPrice)} each</small></span><strong>${money.format(item.quantity * item.unitPrice)}</strong></div>`).join("")}</section><div class="receipt-total"><span>Total</span><strong>${money.format(saleTotal(sale))}</strong></div><div><span>Payment</span><strong>${escapeHtml(sale.payment)}</strong></div>${sale.payment === "Cash" ? `<div><span>Cash received</span><strong>${money.format(sale.cashReceived ?? sale.total)}</strong></div><div><span>Change</span><strong>${money.format(sale.change ?? 0)}</strong></div>` : ""}<footer>Thank you for visiting Halara Coffee Club.</footer></article>`;
+}
+
 function receiptMarkup(sale: Sale): string {
-  return `<article class="receipt-card print-receipt" data-print-receipt><header><img src="${logoUrl}" alt="Halara Coffee Club" /><strong>HALARA COFFEE CLUB</strong><small>Official sales receipt</small></header>${sale.status === "Cancelled" ? '<div class="receipt-cancelled">CANCELLED</div>' : ""}<div><span>Receipt</span><strong>${escapeHtml(sale.receipt)}</strong></div><div><span>Date / time</span><strong>${escapeHtml(formatDateTime(sale.createdAt))}</strong></div><div><span>Cashier</span><strong>${escapeHtml(sale.cashierName)}</strong></div><section class="receipt-items">${sale.items.map((item) => `<div><span><b>${item.quantity} × ${escapeHtml(item.name)}</b><small>${money.format(item.unitPrice)} each</small></span><strong>${money.format(item.quantity * item.unitPrice)}</strong></div>`).join("")}</section><div class="receipt-total"><span>Total</span><strong>${money.format(saleTotal(sale))}</strong></div><div><span>Payment</span><strong>${escapeHtml(sale.payment)}</strong></div>${sale.payment === "Cash" ? `<div><span>Cash received</span><strong>${money.format(sale.cashReceived ?? sale.total)}</strong></div><div><span>Change</span><strong>${money.format(sale.change ?? 0)}</strong></div>` : ""}<footer>Thank you for visiting Halara Coffee Club.</footer></article>`;
+  return `<div class="receipt-print-wrapper" data-print-receipt>${singleReceiptCard(sale, "CUSTOMER COPY")}<div class="receipt-cut-separator"><span>✂ - - - - - - - CUT HERE - - - - - - - ✂</span></div>${singleReceiptCard(sale, "STORE COPY")}</div>`;
 }
 
 function renderSuccess(): string {
@@ -855,7 +873,30 @@ function bindStaff(): void {
     navigateStaff(view);
   }));
   document.querySelectorAll<HTMLButtonElement>("[data-payment]").forEach((button) => button.addEventListener("click", () => { ui.selectedPayment = button.dataset.payment as PaymentMethod; if (ui.selectedPayment !== "Cash") ui.cashReceived = null; persistPosState(); renderStaff(); }));
-  document.querySelector<HTMLInputElement>("#cash-received")?.addEventListener("input", (event) => { ui.cashReceived = Number((event.currentTarget as HTMLInputElement).value); persistPosState(); renderStaff(); document.querySelector<HTMLInputElement>("#cash-received")?.focus(); });
+  const cashInput = document.querySelector<HTMLInputElement>("#cash-received");
+  if (cashInput) {
+    cashInput.addEventListener("input", (event) => {
+      const rawVal = (event.currentTarget as HTMLInputElement).value;
+      const num = parseCashInputAmount(rawVal);
+      ui.cashReceived = num;
+      persistPosState();
+      const total = cartTotal();
+      const currentReceived = ui.cashReceived ?? 0;
+      const isValid = currentReceived + Number.EPSILON >= total;
+      const changeEl = document.querySelector("#cash-change");
+      if (changeEl) changeEl.textContent = money.format(Math.max(0, currentReceived - total));
+      const confirmBtn = document.querySelector<HTMLButtonElement>('[data-action="confirm-payment"]');
+      if (confirmBtn) confirmBtn.disabled = !isValid;
+    });
+    cashInput.addEventListener("blur", () => {
+      if (ui.cashReceived !== null && ui.cashReceived > 0) {
+        cashInput.value = formatCashInputAmount(ui.cashReceived);
+      }
+    });
+    cashInput.addEventListener("focus", () => {
+      cashInput.select();
+    });
+  }
   document.querySelectorAll<HTMLButtonElement>("[data-cash-amount]").forEach((button) => button.addEventListener("click", () => { ui.cashReceived = Number(button.dataset.cashAmount); persistPosState(); renderStaff(); }));
   onAction("add-cart", (button) => addToCart(button.dataset.id!));
   onAction("cart-minus", (button) => changeCart(button.dataset.id!, -1));
