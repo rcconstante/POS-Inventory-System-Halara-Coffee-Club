@@ -843,13 +843,30 @@ function singleReceiptCard(sale: Sale, copyLabel: string): string {
   return `<article class="receipt-card"><header><img src="${logoUrl}" alt="Halara Coffee Club" /><strong>HALARA COFFEE CLUB</strong><small>Official Sales Receipt — ${copyLabel}</small></header>${sale.status === "Cancelled" ? '<div class="receipt-cancelled">CANCELLED</div>' : ""}<div><span>Receipt</span><strong>${escapeHtml(sale.receipt)}</strong></div><div><span>Date / time</span><strong>${escapeHtml(formatDateTime(sale.createdAt))}</strong></div><div><span>Cashier</span><strong>${escapeHtml(sale.cashierName)}</strong></div><section class="receipt-items">${sale.items.map((item) => `<div><span><b>${item.quantity} × ${escapeHtml(item.name)}</b><small>${money.format(item.unitPrice)} each</small></span><strong>${money.format(item.quantity * item.unitPrice)}</strong></div>`).join("")}</section><div class="receipt-total"><span>Total</span><strong>${money.format(saleTotal(sale))}</strong></div><div><span>Payment</span><strong>${escapeHtml(sale.payment)}</strong></div>${sale.payment === "Cash" ? `<div><span>Cash received</span><strong>${money.format(sale.cashReceived ?? sale.total)}</strong></div><div><span>Change</span><strong>${money.format(sale.change ?? 0)}</strong></div>` : ""}<footer>Thank you for visiting Halara Coffee Club.</footer></article>`;
 }
 
+const autoPrintStorageKey = "halara-pos-autoprint";
+function getAutoPrint(): boolean {
+  return window.localStorage.getItem(autoPrintStorageKey) !== "false";
+}
+function setAutoPrint(enabled: boolean): void {
+  window.localStorage.setItem(autoPrintStorageKey, enabled ? "true" : "false");
+}
+
+function printReceipt(sale: Sale): void {
+  const printRoot = document.querySelector<HTMLDivElement>("#print-root");
+  if (printRoot) {
+    printRoot.innerHTML = receiptMarkup(sale);
+  }
+  window.print();
+}
+
 function receiptMarkup(sale: Sale): string {
   return `<div class="receipt-print-wrapper" data-print-receipt>${singleReceiptCard(sale, "CUSTOMER COPY")}<div class="receipt-cut-separator"><span>✂ - - - - - - - CUT HERE - - - - - - - ✂</span></div>${singleReceiptCard(sale, "STORE COPY")}</div>`;
 }
 
 function renderSuccess(): string {
   const sale = ui.completedSale;
-  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
+  const autoPrint = getAutoPrint();
+  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>Auto-print receipt on checkout</span></label>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
 }
 
 function renderStaffOrders(): string {
@@ -903,7 +920,13 @@ function bindStaff(): void {
   onAction("cart-plus", (button) => changeCart(button.dataset.id!, 1));
   onAction("clear-cart", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; persistPosState(); renderStaff(); });
   onAction("confirm-payment", confirmPayment);
-  onAction("print", () => window.print());
+  document.querySelector<HTMLInputElement>("#autoprint-toggle")?.addEventListener("change", (event) => {
+    setAutoPrint((event.currentTarget as HTMLInputElement).checked);
+  });
+  onAction("print", () => {
+    if (ui.completedSale) printReceipt(ui.completedSale);
+    else window.print();
+  });
   onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
   onAction("staff-sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
   onAction("view-receipt", (button) => openReceiptDialog(button.dataset.id!));
@@ -1028,6 +1051,11 @@ async function confirmPayment(button: HTMLButtonElement): Promise<void> {
     ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
     persistPosState();
     navigateStaff("success");
+    if (ui.completedSale && getAutoPrint()) {
+      window.setTimeout(() => {
+        if (ui.completedSale) printReceipt(ui.completedSale);
+      }, 350);
+    }
   } catch (error) {
     setButtonBusy(button, false, "Confirm payment");
     throw error;
@@ -1058,7 +1086,7 @@ function openReceiptDialog(id: string): void {
     body: `<div class="receipt-preview">${receiptMarkup(sale)}</div><button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button>`,
     submitLabel: "Close",
     hideSubmit: true,
-    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", () => window.print()),
+    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", () => printReceipt(sale)),
     onSubmit: async () => undefined,
   });
 }

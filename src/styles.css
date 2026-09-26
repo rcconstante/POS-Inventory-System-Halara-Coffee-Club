@@ -682,12 +682,27 @@ span.settings-avatar { display: grid; place-items: center; }
   .cashier-filter { grid-column: auto; }
 }
 
+#print-root { display: none; }
+.autoprint-setting { display: inline-flex; align-items: center; justify-content: center; gap: 7px; margin: 10px 0 16px; color: var(--muted); font-size: .72rem; font-weight: 600; cursor: pointer; user-select: none; }
+.autoprint-setting input { width: 16px; height: 16px; accent-color: var(--brown-700); cursor: pointer; }
+
 @media print {
-  @page { size: 80mm auto; margin: 3mm; }
-  body * { visibility: hidden; }
-  [data-print-receipt], [data-print-receipt] * { visibility: visible; }
-  [data-print-receipt] { position: absolute; top: 0; left: 0; width: 74mm !important; margin: 0 !important; padding: 2mm !important; color: #000; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-  .receipt-card { border: 0 !important; border-radius: 0 !important; padding: 0 !important; margin-bottom: 6mm !important; page-break-inside: avoid; break-inside: avoid; }
-  .receipt-cut-separator { border-color: #000 !important; color: #000 !important; font-weight: 800 !important; margin: 5mm 0 !important; padding: 3mm 0 !important; page-break-inside: avoid; break-inside: avoid; }
-  .success-actions, .staff-topbar, .modal > header, .modal footer, .print-receipt-button { display: none !important; }
+  @page { size: 80mm auto; margin: 0; }
+  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; color: #000 !important; width: 80mm !important; min-width: 80mm !important; max-width: 80mm !important; height: auto !important; }
+  #app, #modal-root, #toast-region, .toast-region, .skip-link { display: none !important; }
+  #print-root { display: block !important; visibility: visible !important; width: 76mm !important; margin: 0 auto !important; padding: 2mm 0 !important; background: #fff !important; color: #000 !important; }
+  #print-root * { visibility: visible !important; color: #000 !important; border-color: #000 !important; }
+  #print-root .receipt-card { border: none !important; border-radius: 0 !important; padding: 0 !important; margin: 0 0 6mm 0 !important; background: #fff !important; color: #000 !important; page-break-inside: avoid; break-inside: avoid; }
+  #print-root .receipt-card > header { padding-bottom: 8px !important; border-bottom: 1px dashed #000 !important; }
+  #print-root .receipt-card > header img { filter: grayscale(100%) contrast(150%) !important; width: 72px !important; height: 40px !important; }
+  #print-root .receipt-card > header strong { font-size: .85rem !important; letter-spacing: .05em !important; }
+  #print-root .receipt-card > div { display: flex !important; justify-content: space-between !important; padding: 4px 0 !important; border-bottom: 1px solid #ddd !important; font-size: .68rem !important; }
+  #print-root .receipt-items { margin: 6px 0 !important; padding: 4px 0 !important; border-top: 1px dashed #000 !important; border-bottom: 1px dashed #000 !important; }
+  #print-root .receipt-items > div { display: grid !important; grid-template-columns: 1fr auto !important; gap: 8px !important; padding: 4px 0 !important; }
+  #print-root .receipt-items b { font-size: .72rem !important; }
+  #print-root .receipt-items small { font-size: .6rem !important; }
+  #print-root .receipt-total { padding-top: 6px !important; border-bottom: none !important; font-size: .85rem !important; }
+  #print-root .receipt-total strong { font-size: 1rem !important; }
+  #print-root .receipt-card footer { padding-top: 8px !important; font-size: .62rem !important; text-align: center !important; }
+  #print-root .receipt-cut-separator { display: block !important; border-top: 1px dashed #000 !important; border-bottom: 1px dashed #000 !important; color: #000 !important; font-size: .65rem !important; font-weight: 800 !important; text-align: center !important; margin: 6mm 0 !important; padding: 3mm 0 !important; page-break-inside: avoid; break-inside: avoid; }
 }
