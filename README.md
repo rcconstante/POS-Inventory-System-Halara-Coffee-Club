@@ -72,7 +72,7 @@ shifts and force-close an abandoned shift with a required note.
 
 The Admin **Reports** workspace contains separate Sales and Inventory views and
 sectioned PDF/CSV exports. Staff and Admin sales history can preview and reprint
-itemized 58mm receipts. Database changes are synchronized through authenticated
+itemized 80mm receipts. Database changes are synchronized through authenticated
 Supabase Realtime channels; the former 30-second notification polling loop is no
 longer used.
 
@@ -127,10 +127,13 @@ The favicon and installed-app icons use the Halara Coffee Club main logo.
 
 ### Receipt printing on the Bluetooth tablet
 
-Receipts use a fixed 58mm layout with customer and store copies, matching the
-tablet's **Bluetooth Printer → 58mm Roll** configuration. Keep that paper size
-selected in the Android print dialog. The receipt is prepared when its preview
-opens, so Chrome's **menu → Share → Print** can also print it.
+Receipts use a fixed 80mm layout with customer and store copies, matching the
+RP30A-UB printer's physical label (USB + Bluetooth, 80mm, ESC/POS). Select
+**80mm Roll** in the Android print dialog and configure the same width in the
+printer service. A dialog showing 58mm is a service setting, not hardware
+auto-detection; the website cannot change that Android setting. The receipt is
+prepared when its preview opens, so Chrome's **menu → Share → Print** can also
+print it.
 
 The Print receipt button and the checkout auto-print setting request the browser's
 print dialog. Confirm **Print** in that dialog; the website cannot silently send
@@ -143,8 +146,14 @@ If the button opens no dialog, open the site directly in Chrome and try
 printing. See [Android printing limitations](https://developer.android.com/training/printing/html-docs)
 and [Chrome's Android printing instructions](https://support.google.com/chrome/answer/1069693?hl=en&co=GENIE.Platform%3DAndroid).
 
+The client uses RTPrinter System. Its [official app listing](https://play.google.com/store/apps/details?id=com.mocoo.hang.rtprinter)
+provides Bluetooth, USB, and Wi-Fi printing, with manufacturer support limited
+to Rongta printers. Direct printing inside that app and printing through
+Android's system service must be verified separately. A rendered Chrome preview
+does not prove the service delivered the job to the physical printer.
+
 For verification on the actual tablet: open a saved order's receipt, confirm both
-copies appear in the 58mm preview, select the Bluetooth printer, and print once.
+copies appear in the 80mm preview, select the Bluetooth printer, and print once.
 Then verify checkout auto-print and a receipt reprint from Order History. Check a
 long item name and a large order for clipping or missing lines. Browser/PDF checks
 cannot verify Bluetooth delivery or the printer's physical feed/cut behavior.

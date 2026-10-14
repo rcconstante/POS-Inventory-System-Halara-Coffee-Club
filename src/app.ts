@@ -862,7 +862,7 @@ function printReceipt(): void {
 }
 
 function receiptPrintHelp(): string {
-  return `<p class="receipt-print-help">Use Bluetooth Printer with 58mm Roll in the print dialog, then confirm Print. If the button does nothing, open this receipt in Chrome and use menu → Share → Print.</p>`;
+  return `<p class="receipt-print-help">Use Bluetooth Printer with 80mm Roll in the print dialog, then confirm Print. If the button does nothing, open this receipt in Chrome and use menu → Share → Print.</p>`;
 }
 
 function receiptMarkup(sale: Sale): string {
