@@ -158,6 +158,14 @@ renders but paper does not print, test a simple page from Chrome through the
 same printer destination and inspect Android's print queue. Browser layout and
 PDF checks cannot verify Bluetooth delivery. See [Chrome's Android printing instructions](https://support.google.com/chrome/answer/1069693?hl=en&co=GENIE.Platform%3DAndroid).
 
+For an isolated comparison, open `/print-check.html` on the deployed site and
+print its short 58mm text job through the same Android printer destination. This
+page has no authentication, database calls, product images, or POS rendering.
+Its diagnostics record the browser version and print lifecycle events, without
+claiming those events confirm physical printing. Send the diagnostics with the
+physical result to distinguish receipt-document failures from broader Chrome
+or Android print-service failures.
+
 ## Netlify deployment
 
 The repository includes `netlify.toml`. Connect the GitHub repository in
