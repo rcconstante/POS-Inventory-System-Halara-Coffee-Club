@@ -1,4 +1,5 @@
 import "./styles.css";
+import { requestReceiptPrint, syncReceiptPrint } from "./receipt-printing";
 import {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
   Coffee, Download, Eye, EyeOff, FileText, LayoutDashboard, LoaderCircle, LogOut, Menu,
@@ -148,6 +149,7 @@ function icon(name: string, className = ""): string {
 
 function hydrate(root: HTMLElement | Document = document): void {
   createIcons({ icons, attrs: { "aria-hidden": "true", "stroke-width": 1.9 }, nameAttr: "data-lucide", root });
+  syncReceiptPrint(document);
 }
 
 const money = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
@@ -851,12 +853,16 @@ function setAutoPrint(enabled: boolean): void {
   window.localStorage.setItem(autoPrintStorageKey, enabled ? "true" : "false");
 }
 
-function printReceipt(sale: Sale): void {
-  const printRoot = document.querySelector<HTMLDivElement>("#print-root");
-  if (printRoot) {
-    printRoot.innerHTML = receiptMarkup(sale);
+function printReceipt(): void {
+  try {
+    requestReceiptPrint(document, window);
+  } catch (error) {
+    toast(`${errorMessage(error)} If no print dialog opens, use Chrome’s menu → Share → Print.`, "error");
   }
-  window.print();
+}
+
+function receiptPrintHelp(): string {
+  return `<p class="receipt-print-help">Use Bluetooth Printer with 58mm Roll in the print dialog, then confirm Print. If the button does nothing, open this receipt in Chrome and use menu → Share → Print.</p>`;
 }
 
 function receiptMarkup(sale: Sale): string {
@@ -866,7 +872,7 @@ function receiptMarkup(sale: Sale): string {
 function renderSuccess(): string {
   const sale = ui.completedSale;
   const autoPrint = getAutoPrint();
-  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>Auto-print receipt on checkout</span></label>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
+  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>Open print dialog after checkout</span></label>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}${receiptPrintHelp()}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
 }
 
 function renderStaffOrders(): string {
@@ -923,10 +929,7 @@ function bindStaff(): void {
   document.querySelector<HTMLInputElement>("#autoprint-toggle")?.addEventListener("change", (event) => {
     setAutoPrint((event.currentTarget as HTMLInputElement).checked);
   });
-  onAction("print", () => {
-    if (ui.completedSale) printReceipt(ui.completedSale);
-    else window.print();
-  });
+  onAction("print", printReceipt);
   onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
   onAction("staff-sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
   onAction("view-receipt", (button) => openReceiptDialog(button.dataset.id!));
@@ -1052,9 +1055,7 @@ async function confirmPayment(button: HTMLButtonElement): Promise<void> {
     persistPosState();
     navigateStaff("success");
     if (ui.completedSale && getAutoPrint()) {
-      window.setTimeout(() => {
-        if (ui.completedSale) printReceipt(ui.completedSale);
-      }, 350);
+      printReceipt();
     }
   } catch (error) {
     setButtonBusy(button, false, "Confirm payment");
@@ -1082,11 +1083,11 @@ function openReceiptDialog(id: string): void {
   if (!sale) { toast("Receipt could not be found.", "error"); return; }
   openDialog({
     title: `Receipt ${sale.receipt}`,
-    description: "Itemized 80mm thermal receipt preview",
-    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div><button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button>`,
+    description: "Itemized thermal receipt preview",
+    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div>${receiptPrintHelp()}<button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button>`,
     submitLabel: "Close",
     hideSubmit: true,
-    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", () => printReceipt(sale)),
+    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", printReceipt),
     onSubmit: async () => undefined,
   });
 }
@@ -1302,7 +1303,7 @@ function confirmDelete(title: string, description: string, action: () => Promise
   openDialog({ title, description, destructive: true, body: `<div class="confirm-content">${icon("CircleAlert")}<p>Please confirm this database change. It cannot be undone automatically.</p></div>`, submitLabel: "Confirm", onSubmit: async () => action() });
 }
 
-function closeDialog(): void { modalRoot.innerHTML = ""; }
+function closeDialog(): void { modalRoot.innerHTML = ""; syncReceiptPrint(document); }
 function setDialogError(message: string): void { setText("#dialog-error", message); }
 
 async function completeMutation(message: string): Promise<void> {
@@ -1482,6 +1483,8 @@ function toast(message: string, kind: ToastKind): void {
   item.querySelector("button")?.addEventListener("click", () => item.remove()); toastRegion.append(item); hydrate(item);
   window.setTimeout(() => item.remove(), 4500);
 }
+
+window.addEventListener("beforeprint", () => { syncReceiptPrint(document); });
 
 window.addEventListener("popstate", () => {
   restoreLocationState();
