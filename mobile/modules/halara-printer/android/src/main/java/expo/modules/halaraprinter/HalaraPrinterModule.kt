@@ -3,6 +3,7 @@ package expo.modules.halaraprinter
 import android.Manifest
 import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.Context
@@ -19,6 +20,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class HalaraPrinterModule : Module() {
+  private data class PairedPrinter(val device: BluetoothDevice, val name: String, val address: String)
   private val printLock = Any()
   private val timer = Executors.newSingleThreadScheduledExecutor()
   @Volatile private var activeSocket: BluetoothSocket? = null
@@ -34,17 +36,27 @@ class HalaraPrinterModule : Module() {
     return adapter
   }
   private fun savedAddress(): String? = context().getSharedPreferences("halara-printer", Context.MODE_PRIVATE).getString("address", null)
+  private fun pairedPrinters(): List<PairedPrinter> {
+    try {
+      return adapter().bondedDevices
+        .filter { it.type != BluetoothDevice.DEVICE_TYPE_LE }
+        .map { PairedPrinter(it, it.name ?: "Receipt printer", it.address) }
+        .sortedBy { it.name }
+    } catch (error: SecurityException) {
+      throw IllegalStateException("Allow Nearby devices permission in Android Settings, then retry printer setup.", error)
+    }
+  }
   override fun definition() = ModuleDefinition {
     Name("HalaraPrinter")
     AsyncFunction("savedPrinter") {
       val address = savedAddress()
-      if (address == null) null else adapter().bondedDevices.firstOrNull { it.address == address }?.let {
-        mapOf("name" to (it.name ?: "Receipt printer"), "address" to it.address)
+      if (address == null) null else pairedPrinters().firstOrNull { it.address == address }?.let {
+        mapOf("name" to it.name, "address" to it.address)
       }
     }
     AsyncFunction("selectPrinter") { promise: Promise ->
       try {
-        val devices = adapter().bondedDevices.filter { it.type != android.bluetooth.BluetoothDevice.DEVICE_TYPE_LE }.sortedBy { it.name ?: it.address }
+        val devices = pairedPrinters()
         val activity = appContext.currentActivity ?: throw IllegalStateException("Open the app before choosing a printer.")
         activity.runOnUiThread {
           if (devices.isEmpty()) {
@@ -57,12 +69,12 @@ class HalaraPrinterModule : Module() {
               .setNegativeButton("Cancel") { _, _ -> promise.reject("PRINTER_CANCELLED", "Printer selection cancelled.", null) }
               .setOnCancelListener { promise.reject("PRINTER_CANCELLED", "Printer selection cancelled.", null) }.show()
           } else {
-            val labels = devices.map { "${it.name ?: "Bluetooth device"}\n${it.address}" }.toTypedArray()
+            val labels = devices.map { "${it.name}\n${it.address}" }.toTypedArray()
             AlertDialog.Builder(activity).setTitle("Choose your 80mm receipt printer")
               .setItems(labels) { _, index ->
                 val device = devices[index]
                 context().getSharedPreferences("halara-printer", Context.MODE_PRIVATE).edit().putString("address", device.address).apply()
-                promise.resolve(mapOf("name" to (device.name ?: "Receipt printer"), "address" to device.address))
+                promise.resolve(mapOf("name" to device.name, "address" to device.address))
               }
               .setNegativeButton("Cancel") { _, _ -> promise.reject("PRINTER_CANCELLED", "Printer selection cancelled.", null) }
               .setOnCancelListener { promise.reject("PRINTER_CANCELLED", "Printer selection cancelled.", null) }.show()
@@ -74,7 +86,7 @@ class HalaraPrinterModule : Module() {
       val receipt = ReceiptData.parse(receiptJson)
       synchronized(printLock) {
         val address = savedAddress() ?: throw IllegalStateException("Select a receipt printer first.")
-        val device = adapter().bondedDevices.firstOrNull { it.address == address }
+        val device = pairedPrinters().firstOrNull { it.address == address }?.device
           ?: throw IllegalStateException("The saved printer is no longer paired. Open Receipt printer setup.")
         val socket = device.createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805f9b34fb"))
         activeSocket = socket
@@ -85,6 +97,8 @@ class HalaraPrinterModule : Module() {
           startedWriting = true
           ReceiptRenderer.print(receipt, socket.outputStream)
           socket.outputStream.flush()
+        } catch (error: SecurityException) {
+          throw IllegalStateException("Allow Nearby devices permission in Android Settings before printing.", error)
         } catch (error: IOException) {
           val message = if (startedWriting) "Receipt transmission was interrupted. Check the paper before reprinting; the receipt may be partial."
             else "Could not connect to the receipt printer. Check power, Bluetooth pairing, and whether another app is using it."

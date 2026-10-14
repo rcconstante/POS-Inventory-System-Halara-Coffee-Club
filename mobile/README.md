@@ -43,6 +43,8 @@ From the repository root with Node 24, run `node --test tests/*.test.mjs` for
 receipt validation, origin restrictions, bridge responses, and timeout checks.
 
 The custom Bluetooth module requires a native build; Expo Go cannot run it.
+Use `npm run android` for a local native development build. `npm start` runs
+Metro; it does not add the Bluetooth module to Expo Go.
 The root web deployment must include `src/native-pos.ts` before installing the
 app, or the existing website cannot dispatch to the native printer bridge.
 The bridge accepts requests only from the configured HTTPS production origin.

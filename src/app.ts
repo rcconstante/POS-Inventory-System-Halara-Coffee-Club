@@ -148,7 +148,23 @@ function icon(name: string, className = ""): string {
   return `<i data-lucide="${escapeHtml(name)}" class="${escapeHtml(className)}"></i>`;
 }
 
+const imagesWithFallback = new WeakSet<HTMLImageElement>();
+
 function hydrate(root: HTMLElement | Document = document): void {
+  root.querySelectorAll<HTMLImageElement>('img[data-product-fallback]').forEach((image) => {
+    if (imagesWithFallback.has(image)) return;
+    imagesWithFallback.add(image);
+    const fallback = (): void => {
+      if (!image.isConnected) return;
+      const placeholder = document.createElement("span");
+      placeholder.className = `product-fallback ${image.dataset.productFallback === "large" ? "large" : ""}`;
+      placeholder.innerHTML = icon("Coffee");
+      image.replaceWith(placeholder);
+      hydrate(placeholder);
+    };
+    image.addEventListener("error", fallback, { once: true });
+    if (image.complete && image.naturalWidth === 0) fallback();
+  });
   createIcons({ icons, attrs: { "aria-hidden": "true", "stroke-width": 1.9 }, nameAttr: "data-lucide", root });
   syncReceiptPrint(document);
 }
@@ -203,7 +219,7 @@ function canChangeSaleStatus(sale: Sale): boolean {
 
 function productVisual(product: Product, large = false): string {
   return product.imageUrl
-    ? `<img class="product-photo ${large ? "large" : ""}" src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" />`
+    ? `<img class="product-photo ${large ? "large" : ""}" data-product-fallback="${large ? "large" : ""}" src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" />`
     : `<span class="product-fallback ${large ? "large" : ""}">${icon("Coffee")}</span>`;
 }
 
@@ -771,8 +787,8 @@ function renderStaff(): void {
 }
 
 function staffBottomNav(): string {
-  const item = (view: StaffView, iconName: string, label: string) => `<button data-staff-view="${view}" class="${ui.staffView === view ? "active" : ""}">${icon(iconName)}<span>${label}</span></button>`;
-  return `<nav class="staff-nav">${item("dashboard", "LayoutDashboard", "Home")}${item("orders", "Receipt", "Orders")}${item("products", "Coffee", "Products")}${item("cash", "WalletCards", "Cash")}${item("inventory", "Box", "Inventory")}${item("account", "UserRound", "Account")}</nav>`;
+  const item = (view: StaffView, iconName: string, label: string) => `<button data-staff-view="${view}" class="${ui.staffView === view ? "active" : ""}" ${ui.staffView === view ? 'aria-current="page"' : ""}>${icon(iconName)}<span>${label}</span></button>`;
+  return `<nav class="staff-nav" aria-label="Staff navigation">${item("dashboard", "LayoutDashboard", "Home")}${item("orders", "Receipt", "Orders")}${item("products", "Coffee", "Products")}${item("cash", "WalletCards", "Cash")}${item("inventory", "Box", "Inventory")}${item("account", "UserRound", "Account")}</nav>`;
 }
 
 function renderStaffView(): string {
@@ -810,12 +826,12 @@ function renderStaffProducts(): string {
   const categories = ui.data.categories.filter((category) => allProducts.some((product) => product.categoryId === category.id));
   const products = allProducts.filter((product) => (ui.posCategory === "all" || product.categoryId === ui.posCategory) && product.name.toLowerCase().includes(ui.posSearch.toLowerCase()));
   const categoryFilters = `<div class="pos-category-filter" role="group" aria-label="Filter menu by category"><button data-pos-category="all" aria-pressed="${ui.posCategory === "all"}" class="${ui.posCategory === "all" ? "active" : ""}">All</button>${categories.map((category) => `<button data-pos-category="${category.id}" aria-pressed="${ui.posCategory === category.id}" class="${ui.posCategory === category.id ? "active" : ""}">${escapeHtml(category.name)}</button>`).join("")}</div>`;
-  return `<div class="staff-screen products-screen"><div class="staff-heading row"><div><p>Point of sale</p><h1>New order</h1></div><button class="cart-button" data-staff-view="cart">${icon("ShoppingCart")}<span>${cartCount()}</span></button></div><label class="search-box large">${icon("Search")}<input id="pos-search" value="${escapeHtml(ui.posSearch)}" placeholder="Search finished products" /></label>${categoryFilters}<div class="staff-product-grid">${products.length ? products.map((product) => { const soldOut = product.tracksInventory && product.availableStock <= 0; return `<article class="staff-product ${soldOut ? "sold-out" : ""}">${productVisual(product, true)}<div><h2 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h2><p>${escapeHtml(categoryName(product.categoryId))}</p><strong>${money.format(product.price)}</strong><small>${!product.tracksInventory ? "Available · inventory not tracked" : soldOut ? "Unavailable — configure recipe or restock" : `${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"} available`}</small></div><button data-action="add-cart" data-id="${product.id}" ${soldOut ? "disabled" : ""} aria-label="Add ${escapeHtml(product.name)}">${icon("Plus")}</button></article>`; }).join("") : emptyState("Coffee", "No menu items found", "Try another category or search term.")}</div></div>`;
+  return `<div class="staff-screen products-screen"><div class="staff-heading row"><div><p>Point of sale</p><h1>New order</h1></div><button class="cart-button" data-staff-view="cart" aria-label="View cart, ${cartCount()} items">${icon("ShoppingCart")}<span>${cartCount()}</span></button></div><label class="search-box large">${icon("Search")}<input id="pos-search" aria-label="Search finished products" value="${escapeHtml(ui.posSearch)}" placeholder="Search finished products" /></label>${categoryFilters}<div class="staff-product-grid">${products.length ? products.map((product) => { const soldOut = product.tracksInventory && product.availableStock <= 0; return `<article class="staff-product ${soldOut ? "sold-out" : ""}">${productVisual(product, true)}<div><h2 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h2><p>${escapeHtml(categoryName(product.categoryId))}</p><strong>${money.format(product.price)}</strong><small>${!product.tracksInventory ? "Available · inventory not tracked" : soldOut ? "Unavailable — configure recipe or restock" : `${number.format(product.availableStock)} serving${product.availableStock === 1 ? "" : "s"} available`}</small></div><button data-action="add-cart" data-id="${product.id}" ${soldOut ? "disabled" : ""} aria-label="Add ${escapeHtml(product.name)}">${icon("Plus")}</button></article>`; }).join("") : emptyState("Coffee", "No menu items found", "Try another category or search term.")}</div></div>`;
 }
 
 function renderCart(): string {
   const items = ui.cart.flatMap((item) => { const product = ui.data.products.find((candidate) => candidate.id === item.productId); return product ? [{ ...item, product }] : []; });
-  return `<div class="staff-flow"><div class="flow-header"><button data-staff-view="products">${icon("ArrowLeft")}</button><div><p>Current order</p><h1>Review items</h1></div><button data-action="clear-cart" aria-label="Clear cart">${icon("Trash2")}</button></div><div class="cart-lines">${items.length ? items.map((item) => `<article>${productVisual(item.product)}<div><strong>${escapeHtml(item.product.name)}</strong><small>${money.format(item.product.price)} each</small></div><div class="quantity"><button data-action="cart-minus" data-id="${item.product.id}">${icon("Minus")}</button><b>${item.quantity}</b><button data-action="cart-plus" data-id="${item.product.id}">${icon("Plus")}</button></div><strong>${money.format(item.product.price * item.quantity)}</strong></article>`).join("") : emptyState("ShoppingCart", "Your order is empty", "Add products to continue to payment.")}</div><div class="order-total"><span><small>Subtotal</small><strong>${money.format(cartTotal())}</strong></span><span><small>Total</small><strong>${money.format(cartTotal())}</strong></span></div><button class="button primary wide" data-staff-view="payment" ${items.length ? "" : "disabled"}>Proceed to payment</button></div>`;
+  return `<div class="staff-flow"><div class="flow-header"><button data-staff-view="products" aria-label="Back to menu">${icon("ArrowLeft")}</button><div><p>Current order</p><h1>Review items</h1></div><button data-action="clear-cart" aria-label="Clear cart">${icon("Trash2")}</button></div><div class="cart-lines">${items.length ? items.map((item) => `<article>${productVisual(item.product)}<div><strong>${escapeHtml(item.product.name)}</strong><small>${money.format(item.product.price)} each</small></div><div class="quantity"><button data-action="cart-minus" data-id="${item.product.id}" aria-label="Decrease ${escapeHtml(item.product.name)} quantity">${icon("Minus")}</button><b>${item.quantity}</b><button data-action="cart-plus" data-id="${item.product.id}" aria-label="Increase ${escapeHtml(item.product.name)} quantity">${icon("Plus")}</button></div><strong>${money.format(item.product.price * item.quantity)}</strong></article>`).join("") : emptyState("ShoppingCart", "Your order is empty", "Add products to continue to payment.")}</div><div class="order-total"><span><small>Subtotal</small><strong>${money.format(cartTotal())}</strong></span><span><small>Total</small><strong>${money.format(cartTotal())}</strong></span></div><button class="button primary wide" data-staff-view="payment" ${items.length ? "" : "disabled"}>Proceed to payment</button></div>`;
 }
 
 function formatCashInputAmount(amount: number | null): string {
@@ -837,7 +853,7 @@ function renderPayment(): string {
   const received = ui.cashReceived ?? 0;
   const cashValid = ui.selectedPayment !== "Cash" || received + Number.EPSILON >= total;
   const cashFields = ui.selectedPayment === "Cash" ? `<div class="cash-payment-fields"><label class="field"><span>Cash received (PHP)</span><input id="cash-received" type="text" value="${formatCashInputAmount(ui.cashReceived)}" placeholder="0.00" inputmode="decimal" autocomplete="off" required /></label><div><span>Change</span><strong id="cash-change">${money.format(Math.max(0, received - total))}</strong></div><div class="cash-quick"><button type="button" data-cash-amount="${total}">Exact</button>${[100, 200, 500, 1000, 2000, 5000].filter((amount) => amount >= total).map((amount) => `<button type="button" data-cash-amount="${amount}">${money.format(amount)}</button>`).join("")}</div></div>` : "";
-  return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(total)}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div>${cashFields}<div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment && cashValid ? "" : "disabled"}>Confirm payment</button></div></article></div>`;
+  return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart" aria-label="Back to cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(total)}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div>${cashFields}<div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment && cashValid ? "" : "disabled"}>Confirm payment</button></div></article></div>`;
 }
 
 function paymentOption(method: PaymentMethod, logo: string): string {
@@ -960,7 +976,16 @@ function bindStaff(): void {
   onAction("cash-movement", (button) => openCashMovementDialog(button.dataset.type as "Cash In" | "Cash Out"));
   onAction("close-shift", () => { const shift = currentCashShift(); if (shift) openCloseShiftDialog(shift.id, false); });
   document.querySelectorAll<HTMLButtonElement>("[data-pos-category]").forEach((button) => button.addEventListener("click", () => { ui.posCategory = button.dataset.posCategory ?? "all"; renderStaff(); }));
-  document.querySelector<HTMLInputElement>("#pos-search")?.addEventListener("input", (event) => { ui.posSearch = (event.currentTarget as HTMLInputElement).value; renderStaff(); document.querySelector<HTMLInputElement>("#pos-search")?.focus(); });
+  document.querySelector<HTMLInputElement>("#pos-search")?.addEventListener("input", (event) => {
+    const input = event.currentTarget as HTMLInputElement;
+    const selectionStart = input.selectionStart;
+    const selectionEnd = input.selectionEnd;
+    ui.posSearch = input.value;
+    renderStaff();
+    const restored = document.querySelector<HTMLInputElement>("#pos-search");
+    restored?.focus({ preventScroll: true });
+    if (selectionStart !== null && selectionEnd !== null) restored?.setSelectionRange(selectionStart, selectionEnd);
+  });
   bindPasswordForm("#staff-password-form");
 }
 
@@ -1306,10 +1331,18 @@ interface DialogOptions {
   onSubmit: (form: HTMLFormElement) => Promise<void>;
 }
 
+let dialogReturnFocus: HTMLElement | null = null;
+
+function dialogIsSaving(): boolean {
+  return modalRoot.querySelector<HTMLButtonElement>('#dialog-form button[type="submit"]')?.disabled ?? false;
+}
+
 function openDialog(options: DialogOptions): void {
+  if (!modalRoot.childElementCount) dialogReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  app.inert = true;
   modalRoot.innerHTML = `<div class="modal-backdrop"><section class="modal ${options.wide ? "wide" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><p class="eyebrow">${ui.session?.role === "staff" ? "Staff POS" : "Admin dashboard"}</p><h2 id="modal-title">${escapeHtml(options.title)}</h2>${options.description ? `<span>${escapeHtml(options.description)}</span>` : ""}</div><button class="modal-close" type="button" aria-label="Close">${icon("X")}</button></header><form id="dialog-form" novalidate><div class="modal-body"><p class="form-message" id="dialog-error" role="alert"></p>${options.body}</div><footer><button class="button secondary modal-cancel" type="button">Cancel</button>${options.hideSubmit ? "" : `<button class="button ${options.destructive ? "danger-button" : "primary"}" type="submit">${escapeHtml(options.submitLabel)}</button>`}</footer></form></section></div>`;
   hydrate(modalRoot);
-  const close = (): void => closeDialog();
+  const close = (): void => { if (!dialogIsSaving()) closeDialog(); };
   document.querySelector(".modal-close")?.addEventListener("click", close);
   document.querySelector(".modal-cancel")?.addEventListener("click", close);
   document.querySelector(".modal-backdrop")?.addEventListener("mousedown", (event) => { if (event.target === event.currentTarget) close(); });
@@ -1329,7 +1362,13 @@ function confirmDelete(title: string, description: string, action: () => Promise
   openDialog({ title, description, destructive: true, body: `<div class="confirm-content">${icon("CircleAlert")}<p>Please confirm this database change. It cannot be undone automatically.</p></div>`, submitLabel: "Confirm", onSubmit: async () => action() });
 }
 
-function closeDialog(): void { modalRoot.innerHTML = ""; syncReceiptPrint(document); }
+function closeDialog(): void {
+  modalRoot.innerHTML = "";
+  app.inert = false;
+  if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus();
+  dialogReturnFocus = null;
+  syncReceiptPrint(document);
+}
 function setDialogError(message: string): void { setText("#dialog-error", message); }
 
 async function completeMutation(message: string): Promise<void> {
@@ -1359,6 +1398,21 @@ function bindPasswordForm(selector: string): void {
 }
 
 document.addEventListener("keydown", (event) => {
+  const dialog = modalRoot.querySelector<HTMLElement>('[role="dialog"]');
+  if (dialog && event.key === "Escape") {
+    event.preventDefault();
+    if (!dialogIsSaving()) closeDialog();
+    return;
+  }
+  if (dialog && event.key === "Tab") {
+    const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled):not([type="hidden"]),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (first && last && (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  }
   if (event.key === "Escape" && ui.notificationsOpen) closeNotifications();
 });
 
@@ -1514,6 +1568,10 @@ window.addEventListener("beforeprint", () => { beginReceiptPrint(document); });
 window.addEventListener("afterprint", () => { endReceiptPrint(document); });
 
 window.addEventListener("popstate", () => {
+  if (modalRoot.childElementCount) {
+    if (dialogIsSaving()) { syncLocation(true); return; }
+    closeDialog();
+  }
   restoreLocationState();
   syncLocation(true);
   if (ui.session?.role === "admin" && ui.route === "reports" && !ui.report) void loadReport();
