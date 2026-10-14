@@ -20,6 +20,7 @@ were created during this audit.
 | Add, increase, decrease and clear cart | Passed |
 | Cash/GCash/Maya selection and insufficient-cash validation | Passed |
 | Cash change and payment failure recovery | Passed |
+| Checkout controls, Back and repeated clicks during a slow save | Passed; one request while saving |
 | Payment retries retain the same submission reference | Passed with intercepted writes |
 | Saved receipt snapshot and native print dispatch | Passed with a test printer receiver |
 | Printer failure feedback | Passed with a test failure response |
@@ -39,10 +40,16 @@ current-tab semantics, keyboard behavior and image recovery.
   trusted origins, response matching, errors and timeouts without retries.
 - The custom printer module's native lint report contains zero errors. Four
   optional Android KTX style suggestions remain.
+- Android 1.0.1 (version code 2) builds successfully. Its signature matches
+  1.0.0, and APK inspection confirms the production site URL, native printer
+  bridge, ARM64/ARMv7 libraries and Android 7 minimum.
 - The full dependency lint scan crashes in the upstream Worklets Kotlin lint
   analyzer (`Cannot find a KaModule for the VirtualFile`). The custom module
   was checked separately with the two upstream dependency-analysis tasks
   excluded. This is not a clean full-dependency lint result.
+  The scoped command is `gradlew :halara-printer:lintRelease -x
+  :react-native-worklets:lintAnalyzeRelease -x
+  :expo-modules-core:lintAnalyzeRelease`.
 - Bluetooth permission declarations now belong to the native module as well
   as the application, and revoked permission produces useful error handling.
   The custom module now treats lint errors as build failures.
@@ -56,5 +63,5 @@ and select it once through Account → Receipt printer setup.
 
 Verify staff login and navigation, cash and digital receipt copies, auto-print,
 an older order reprint, permission denial/recovery, printer-off recovery, and
-Android's hardware Back button. Physical Bluetooth printing and a real payment
+Android's hardware Back button, rotation and keyboard scrolling. Physical Bluetooth printing and a real payment
 write were not exercised in this audit.

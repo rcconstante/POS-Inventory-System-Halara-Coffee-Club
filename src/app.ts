@@ -123,6 +123,7 @@ let refreshPromise: Promise<void> | null = null;
 let installPrompt: InstallPromptEvent | null = null;
 let notificationTrigger: HTMLButtonElement | null = null;
 let intentionalLogout = false;
+let paymentSaving = false;
 
 api.subscribeSessionExpiry(() => {
   if (!ui.session || intentionalLogout) return;
@@ -784,6 +785,11 @@ function renderStaff(): void {
   const hideNav = ["cart", "payment", "success"].includes(ui.staffView);
   app.innerHTML = `<main class="staff-app" id="main-content"><header class="staff-topbar"><img src="${logoUrl}" alt="Company logo" /><div><div class="notification-wrap"><button class="notification-button" data-action="notifications" aria-label="Open notifications" aria-expanded="${ui.notificationsOpen}">${icon("Bell")}<b data-notification-count>${ui.unread || ""}</b></button>${ui.notificationsOpen ? renderNotificationPopover() : ""}</div><button class="staff-account" data-staff-view="account">${avatarMarkup(session)}<strong>${escapeHtml(session.displayName)}</strong></button></div></header><section class="staff-stage">${renderStaffView()}</section>${hideNav ? "" : staffBottomNav()}</main>`;
   hydrate(app); bindStaff();
+  if (paymentSaving) {
+    app.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button,input').forEach((control) => { control.disabled = true; });
+    const confirm = app.querySelector<HTMLButtonElement>('[data-action="confirm-payment"]');
+    if (confirm) setButtonBusy(confirm, true, "Saving payment");
+  }
 }
 
 function staffBottomNav(): string {
@@ -1089,14 +1095,16 @@ function cartIngredientsAvailable(cart: CartItem[]): boolean {
   });
 }
 
-async function confirmPayment(button: HTMLButtonElement): Promise<void> {
+async function confirmPayment(): Promise<void> {
+  if (paymentSaving) return;
   if (!ui.selectedPayment || !ui.cart.length) return;
   if (!currentCashShift()) { toast("Open a cashier shift before processing a sale.", "error"); navigateStaff("cash"); return; }
   if (ui.selectedPayment === "Cash" && (ui.cashReceived === null || ui.cashReceived + Number.EPSILON < cartTotal())) { toast("Cash received must cover the order total.", "error"); return; }
-  setButtonBusy(button, true, "Saving payment");
-  ui.paymentReference ??= crypto.randomUUID();
-  persistPosState();
+  paymentSaving = true;
   try {
+    ui.paymentReference ??= crypto.randomUUID();
+    persistPosState();
+    renderStaff();
     const result = await api.createSale(ui.selectedPayment, ui.cart, ui.selectedPayment === "Cash" ? ui.cashReceived : null, ui.paymentReference);
     await refreshAll(false);
     ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
@@ -1105,9 +1113,9 @@ async function confirmPayment(button: HTMLButtonElement): Promise<void> {
     if (ui.completedSale && getAutoPrint()) {
       printReceipt();
     }
-  } catch (error) {
-    setButtonBusy(button, false, "Confirm payment");
-    throw error;
+  } finally {
+    paymentSaving = false;
+    if (ui.session?.role === "staff") renderStaff();
   }
 }
 
@@ -1568,6 +1576,7 @@ window.addEventListener("beforeprint", () => { beginReceiptPrint(document); });
 window.addEventListener("afterprint", () => { endReceiptPrint(document); });
 
 window.addEventListener("popstate", () => {
+  if (paymentSaving) { syncLocation(true); return; }
   if (modalRoot.childElementCount) {
     if (dialogIsSaving()) { syncLocation(true); return; }
     closeDialog();
