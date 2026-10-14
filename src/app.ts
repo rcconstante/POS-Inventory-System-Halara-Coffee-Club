@@ -1,6 +1,5 @@
 import "./styles.css";
-import { requestReceiptPrint, syncReceiptPrint } from "./receipt-printing";
-import { createReceiptImage, downloadReceiptImage, shareReceiptImage } from "./receipt-image";
+import { beginReceiptPrint, endReceiptPrint, requestReceiptPrint, syncReceiptPrint } from "./receipt-printing";
 import {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
   Coffee, Download, Eye, EyeOff, FileText, LayoutDashboard, LoaderCircle, LogOut, Menu,
@@ -854,7 +853,7 @@ function setAutoPrint(enabled: boolean): void {
   window.localStorage.setItem(autoPrintStorageKey, enabled ? "true" : "false");
 }
 
-function printInBrowser(): void {
+function printReceipt(): void {
   try {
     requestReceiptPrint(document, window);
   } catch (error) {
@@ -862,45 +861,18 @@ function printInBrowser(): void {
   }
 }
 
-function usesPrintingApp(): boolean { return /Android/i.test(navigator.userAgent); }
-
-async function printReceipt(button: HTMLButtonElement): Promise<void> {
-  if (!usesPrintingApp()) { printInBrowser(); return; }
-  await exportReceiptImage(button, true);
-}
-
-async function exportReceiptImage(button: HTMLButtonElement, share = false): Promise<void> {
-  const label = button.textContent?.trim() || "Save receipt image";
-  setButtonBusy(button, true, "Preparing receipt");
-  try {
-    const file = await createReceiptImage(document);
-    if (share) {
-      toast("Choose RTPrinter System in the app list, then print the receipt image.", "info");
-      const result = await shareReceiptImage(file);
-      if (result === "downloaded") toast("Receipt image saved. Open it in RTPrinter System to print.", "info");
-    } else {
-      downloadReceiptImage(file);
-      toast("Receipt image saved. Open it in RTPrinter System to print.", "info");
-    }
-  } catch (error) {
-    handleError(error);
-  } finally {
-    setButtonBusy(button, false, label, share ? "Printer" : "Download");
-  }
-}
-
 function receiptPrintHelp(): string {
-  return `<p class="receipt-print-help">On Android, Print receipt opens the app picker. Choose RTPrinter System, then print the receipt image. If it is not listed, save the receipt image and open it from RTPrinter System’s picture-printing screen. The receipt includes both copies.</p>`;
+  return `<p class="receipt-print-help">Choose your printer and its available roll size in the print dialog, then tap Print. The receipt fits the selected paper width.</p>`;
 }
 
 function receiptMarkup(sale: Sale): string {
-  return `<div class="receipt-print-wrapper" data-print-receipt data-receipt-number="${escapeHtml(sale.receipt)}">${singleReceiptCard(sale, "CUSTOMER COPY")}<div class="receipt-cut-separator"><span>✂ - - - - - - - CUT HERE - - - - - - - ✂</span></div>${singleReceiptCard(sale, "STORE COPY")}</div>`;
+  return `<div class="receipt-print-wrapper" data-print-receipt>${singleReceiptCard(sale, "CUSTOMER COPY")}<div class="receipt-cut-separator"><span>✂ - - - - - - - CUT HERE - - - - - - - ✂</span></div>${singleReceiptCard(sale, "STORE COPY")}</div>`;
 }
 
 function renderSuccess(): string {
   const sale = ui.completedSale;
   const autoPrint = getAutoPrint();
-  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p>${usesPrintingApp() ? "" : `<label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>Open print dialog after checkout</span></label>`}${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}${receiptPrintHelp()}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button secondary" data-action="save-receipt-image">${icon("Download")} Save receipt image</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
+  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>Open print dialog after checkout</span></label>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}${receiptPrintHelp()}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
 }
 
 function renderStaffOrders(): string {
@@ -958,7 +930,6 @@ function bindStaff(): void {
     setAutoPrint((event.currentTarget as HTMLInputElement).checked);
   });
   onAction("print", printReceipt);
-  onAction("save-receipt-image", (button) => exportReceiptImage(button));
   onAction("new-order", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; ui.completedSale = null; persistPosState(); navigateStaff("products"); });
   onAction("staff-sale-status", (button) => openSaleStatusDialog(button.dataset.id!, button.dataset.status as SaleStatus));
   onAction("view-receipt", (button) => openReceiptDialog(button.dataset.id!));
@@ -1083,8 +1054,8 @@ async function confirmPayment(button: HTMLButtonElement): Promise<void> {
     ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
     persistPosState();
     navigateStaff("success");
-    if (ui.completedSale && getAutoPrint() && !usesPrintingApp()) {
-      printInBrowser();
+    if (ui.completedSale && getAutoPrint()) {
+      printReceipt();
     }
   } catch (error) {
     setButtonBusy(button, false, "Confirm payment");
@@ -1113,13 +1084,10 @@ function openReceiptDialog(id: string): void {
   openDialog({
     title: `Receipt ${sale.receipt}`,
     description: "Itemized thermal receipt preview",
-    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div>${receiptPrintHelp()}<button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button><button class="button secondary wide print-receipt-button" type="button" data-dialog-save-receipt>${icon("Download")} Save receipt image</button>`,
+    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div>${receiptPrintHelp()}<button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button>`,
     submitLabel: "Close",
     hideSubmit: true,
-    onOpen: () => {
-      document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", (event) => { void printReceipt(event.currentTarget as HTMLButtonElement); });
-      document.querySelector<HTMLButtonElement>("[data-dialog-save-receipt]")?.addEventListener("click", (event) => { void exportReceiptImage(event.currentTarget as HTMLButtonElement); });
-    },
+    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", printReceipt),
     onSubmit: async () => undefined,
   });
 }
@@ -1516,7 +1484,8 @@ function toast(message: string, kind: ToastKind): void {
   window.setTimeout(() => item.remove(), 4500);
 }
 
-window.addEventListener("beforeprint", () => { syncReceiptPrint(document); });
+window.addEventListener("beforeprint", () => { beginReceiptPrint(document); });
+window.addEventListener("afterprint", () => { endReceiptPrint(document); });
 
 window.addEventListener("popstate", () => {
   restoreLocationState();
