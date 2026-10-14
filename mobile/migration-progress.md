@@ -30,6 +30,10 @@ Status recorded October 14, 2026.
 - Expo doctor passes all 21 checks; Android JavaScript export passes.
 - Eight protocol/bridge tests cover origin isolation, totals, tender/change,
   response matching, native errors, and timeouts without automatic retries.
+- Signed Android release build succeeds, including native Kotlin compilation
+  and release checks. APK inspection confirms the custom printer module,
+  Hermes bundle, ARM64/ARMv7 libraries, Android 7 minimum, and EAS signing key.
+- The web bridge is deployed on the production Halara site.
 - The deployed staff website has been opened and signed into with the existing
   thesis demo account using agent-browser; tablet baselines are in `.test/`.
 - The local web build passes a browser check using live staff data: all six staff
