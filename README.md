@@ -128,35 +128,39 @@ The favicon and installed-app icons use the Halara Coffee Club main logo.
 ### Receipt printing on the Bluetooth tablet
 
 Receipts use a fixed 80mm layout with customer and store copies, matching the
-RP30A-UB printer's physical label (USB + Bluetooth, 80mm, ESC/POS). Select
-**80mm Roll** in the Android print dialog and configure the same width in the
-printer service. A dialog showing 58mm is a service setting, not hardware
-auto-detection; the website cannot change that Android setting. The receipt is
-prepared when its preview opens, so Chrome's **menu → Share → Print** can also
-print it.
+RP30A-UB printer's physical label (USB + Bluetooth, 80mm, ESC/POS).
 
-The Print receipt button and the checkout auto-print setting request the browser's
-print dialog. Confirm **Print** in that dialog; the website cannot silently send
-a job or verify whether paper printed. The Bluetooth printer must be available
-through an enabled Android print service. A separate app being able to print does
-not establish that it exposes the printer to Chrome. If the printer is missing,
-check the printer vendor's Android print-service support and Bluetooth pairing.
-If the button opens no dialog, open the site directly in Chrome and try
-**menu → Share → Print**. Android WebView does not support JavaScript-triggered
-printing. See [Android printing limitations](https://developer.android.com/training/printing/html-docs)
-and [Chrome's Android printing instructions](https://support.google.com/chrome/answer/1069693?hl=en&co=GENIE.Platform%3DAndroid).
+On Android, **Print receipt** creates a black-and-white PNG of the complete
+receipt and opens Android's file-sharing picker. Choose **RTPrinter System**
+and print the image there. This bypasses the Chrome system-print path that was
+exposing only 58mm sizes and failing to produce paper. The website cannot
+select an Android share target automatically or verify physical printing.
 
-The client uses RTPrinter System. Its [official app listing](https://play.google.com/store/apps/details?id=com.mocoo.hang.rtprinter)
-provides Bluetooth, USB, and Wi-Fi printing, with manufacturer support limited
-to Rongta printers. Direct printing inside that app and printing through
-Android's system service must be verified separately. A rendered Chrome preview
-does not prove the service delivered the job to the physical printer.
+If RTPrinter System is not offered by Android's share picker, use **Save receipt
+image**, then open the downloaded PNG in RTPrinter System's picture-printing
+screen. Browsers that cannot share files also download the receipt image.
+Cancelling the share picker does not trigger a download or another print job.
+Receipt images are generated on the device; no receipt is uploaded to a new
+service. Exporting or printing never creates another sale or changes inventory.
 
-For verification on the actual tablet: open a saved order's receipt, confirm both
-copies appear in the 80mm preview, select the Bluetooth printer, and print once.
-Then verify checkout auto-print and a receipt reprint from Order History. Check a
-long item name and a large order for clipping or missing lines. Browser/PDF checks
-cannot verify Bluetooth delivery or the printer's physical feed/cut behavior.
+Desktop **Print receipt** and its optional checkout auto-print setting still use
+the browser print dialog. On Android, tap **Print receipt** after checkout;
+Android file sharing requires a user gesture, so no automatic share is attempted.
+Chrome's **menu → Share → Print** remains available for printers with a working
+Android system print service. Paper sizes in that dialog come from the service,
+not the website. See [Android printer capabilities](https://developer.android.com/reference/android/print/PrinterCapabilitiesInfo).
+
+RTPrinter System's [official app listing](https://play.google.com/store/apps/details?id=com.mocoo.hang.rtprinter)
+provides Bluetooth, USB, Wi-Fi, and picture printing, with manufacturer support
+limited to Rongta printers. Availability in the Android share picker and hardware
+compatibility must be checked on the actual tablet.
+
+For verification: open a saved order's receipt, tap **Print receipt**, select
+RTPrinter System if offered, and print the receipt image. Check both copies,
+a long item name, and a cash payment's tender and change. Also verify **Save
+receipt image**, cancellation, and reprinting a different order. Browser checks
+verify image output and file dispatch; they cannot verify Bluetooth delivery or
+the printer's physical feed/cut behavior.
 
 ## Netlify deployment
 
