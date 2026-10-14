@@ -1,4 +1,5 @@
 import "./styles.css";
+import { isNativePos, printNativeReceipt, selectNativePrinter } from "./native-pos";
 import { beginReceiptPrint, endReceiptPrint, requestReceiptPrint, syncReceiptPrint } from "./receipt-printing";
 import {
   ArrowLeft, BarChart3, Bell, Box, Boxes, Check, ChevronDown, CircleAlert, CircleCheck,
@@ -233,7 +234,7 @@ function writeLocation(path: string, replace = false): void {
 function restoreLocationState(): void {
   const [area, view] = locationParts();
   if (!ui.session) {
-    ui.roleChoice = area === "login" && (view === "admin" || view === "staff") ? view : null;
+    ui.roleChoice = isNativePos() ? "staff" : area === "login" && (view === "admin" || view === "staff") ? view : null;
     return;
   }
   if (ui.session.role === "admin") {
@@ -304,7 +305,7 @@ function isInstalledApp(): boolean {
 }
 
 function installAppButton(label = "Install Halara POS"): string {
-  return isInstalledApp() ? "" : `<button class="button secondary install-app-button" type="button" data-action="install-app">${icon("Download")} ${escapeHtml(label)}</button>`;
+  return isNativePos() || isInstalledApp() ? "" : `<button class="button secondary install-app-button" type="button" data-action="install-app">${icon("Download")} ${escapeHtml(label)}</button>`;
 }
 
 async function installApp(): Promise<void> {
@@ -323,6 +324,7 @@ async function bootstrap(): Promise<void> {
   renderLoading("Opening your workspace");
   try {
     ui.session = await api.session();
+    if (isNativePos() && ui.session.role !== "staff") { await api.logout(); throw new Error("This app requires a staff account."); }
     await refreshAll(false);
     restorePosState();
     restoreLocationState();
@@ -387,6 +389,7 @@ function render(): void {
 
 
 function renderAccess(): void {
+  if (isNativePos()) ui.roleChoice = "staff";
   if (!ui.roleChoice) {
     app.innerHTML = `
       <main class="access-page" id="main-content">
@@ -416,7 +419,7 @@ function renderAccess(): void {
     <main class="login-shell" id="main-content">
       <section class="login-panel">
         <div class="login-content">
-          <button class="back-link" id="back-role" type="button">${icon("ArrowLeft")} Choose another role</button>
+          ${isNativePos() ? "" : `<button class="back-link" id="back-role" type="button">${icon("ArrowLeft")} Choose another role</button>`}
           <img class="login-logo" src="${logoUrl}" alt="Company logo" />
           <div class="login-heading">
             <img class="login-role-badge" src="${roleImg}" alt="${isAdmin ? "Admin" : "Staff"}" />
@@ -853,7 +856,25 @@ function setAutoPrint(enabled: boolean): void {
   window.localStorage.setItem(autoPrintStorageKey, enabled ? "true" : "false");
 }
 
+let nativePrintBusy = false;
+
 function printReceipt(): void {
+  if (isNativePos()) {
+    const previewId = document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.dataset.saleId;
+    const sale = previewId ? ui.data.sales.find((entry) => entry.id === previewId) : ui.completedSale;
+    if (!sale || ui.session?.role !== "staff") { toast("Open a saved staff receipt before printing.", "error"); return; }
+    if (nativePrintBusy) { toast("A receipt is already being sent to the printer.", "info"); return; }
+    nativePrintBusy = true;
+    toast("Connecting to the receipt printer…", "info");
+    void printNativeReceipt({
+      receipt: sale.receipt, status: sale.status, dateTime: formatDateTime(sale.createdAt), cashier: sale.cashierName,
+      payment: sale.payment, totalCentavos: Math.round(saleTotal(sale) * 100),
+      cashReceivedCentavos: sale.payment === "Cash" ? Math.round((sale.cashReceived ?? sale.total) * 100) : null,
+      changeCentavos: sale.payment === "Cash" ? Math.round((sale.change ?? 0) * 100) : null,
+      items: sale.items.map((item) => ({ name: item.name, quantity: item.quantity, unitPriceCentavos: Math.round(item.unitPrice * 100) })),
+    }).then((message) => toast(message, "info")).catch(handleError).finally(() => { nativePrintBusy = false; });
+    return;
+  }
   try {
     requestReceiptPrint(document, window);
   } catch (error) {
@@ -862,6 +883,7 @@ function printReceipt(): void {
 }
 
 function receiptPrintHelp(): string {
+  if (isNativePos()) return `<p class="receipt-print-help">Print sends both copies directly to your saved Bluetooth printer. Pair the printer in Android Settings first. <button class="small-button" type="button" data-action="native-printer">${icon("Printer")} Printer setup</button></p>`;
   return `<p class="receipt-print-help">Choose your printer and its available roll size in the print dialog, then tap Print. The receipt fits the selected paper width.</p>`;
 }
 
@@ -872,7 +894,7 @@ function receiptMarkup(sale: Sale): string {
 function renderSuccess(): string {
   const sale = ui.completedSale;
   const autoPrint = getAutoPrint();
-  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>Open print dialog after checkout</span></label>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}${receiptPrintHelp()}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
+  return `<div class="staff-flow success-flow"><div class="success-mark">${icon("Check")}</div><h1>Payment successful</h1><p>The transaction was saved and inventory was updated.</p><label class="autoprint-setting"><input type="checkbox" id="autoprint-toggle" ${autoPrint ? "checked" : ""} /><span>${isNativePos() ? "Print receipt after checkout" : "Open print dialog after checkout"}</span></label>${sale ? receiptMarkup(sale) : emptyState("Receipt", "Receipt unavailable", "Open Order History to view this transaction.")}${receiptPrintHelp()}<div class="success-actions"><button class="button secondary" data-action="print">${icon("Printer")} Print receipt</button><button class="button primary" data-action="new-order">${icon("Plus")} New order</button></div></div>`;
 }
 
 function renderStaffOrders(): string {
@@ -885,11 +907,12 @@ function renderStaffInventory(): string {
 }
 
 function renderStaffAccount(): string {
-  return `<div class="staff-screen account-screen"><div class="staff-heading"><p>Account</p><h1>Profile & security</h1></div><article class="panel profile-card">${avatarMarkup(ui.session!, "staff-profile-avatar")}<div><h3>${escapeHtml(ui.session!.displayName)}</h3><small>${escapeHtml(ui.session!.email)}</small><b>Staff</b></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Security</p><h3>Change password</h3></div>${icon("ShieldCheck")}</div>${passwordForm("staff-password-form")}</article>${installAppButton("Add POS to home screen")}<button class="button secondary wide" data-action="logout">${icon("LogOut")} Sign out</button></div>`;
+  return `<div class="staff-screen account-screen"><div class="staff-heading"><p>Account</p><h1>Profile & security</h1></div><article class="panel profile-card">${avatarMarkup(ui.session!, "staff-profile-avatar")}<div><h3>${escapeHtml(ui.session!.displayName)}</h3><small>${escapeHtml(ui.session!.email)}</small><b>Staff</b></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Security</p><h3>Change password</h3></div>${icon("ShieldCheck")}</div>${passwordForm("staff-password-form")}</article>${isNativePos() ? `<button class="button secondary wide" data-action="native-printer">${icon("Printer")} Receipt printer setup</button>` : installAppButton("Add POS to home screen")}<button class="button secondary wide" data-action="logout">${icon("LogOut")} Sign out</button></div>`;
 }
 
 function bindStaff(): void {
   bindCommon();
+  onAction("native-printer", async () => { try { toast(await selectNativePrinter(), "info"); } catch (error) { handleError(error); } });
   document.querySelectorAll<HTMLButtonElement>("[data-staff-view]").forEach((button) => button.addEventListener("click", () => {
     const view = button.dataset.staffView as StaffView;
     if (view === "payment" && !ui.cart.length) return;
@@ -1084,10 +1107,13 @@ function openReceiptDialog(id: string): void {
   openDialog({
     title: `Receipt ${sale.receipt}`,
     description: "Itemized thermal receipt preview",
-    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div>${receiptPrintHelp()}<button class="button primary wide print-receipt-button" type="button" data-dialog-print>${icon("Printer")} Print receipt</button>`,
+    body: `<div class="receipt-preview">${receiptMarkup(sale)}</div>${receiptPrintHelp()}<button class="button primary wide print-receipt-button" type="button" data-dialog-print data-sale-id="${escapeHtml(sale.id)}">${icon("Printer")} Print receipt</button>`,
     submitLabel: "Close",
     hideSubmit: true,
-    onOpen: () => document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", printReceipt),
+    onOpen: () => {
+      document.querySelector<HTMLButtonElement>("[data-dialog-print]")?.addEventListener("click", printReceipt);
+      modalRoot.querySelector<HTMLButtonElement>('[data-action="native-printer"]')?.addEventListener("click", () => { void selectNativePrinter().then((message) => toast(message, "info")).catch(handleError); });
+    },
     onSubmit: async () => undefined,
   });
 }

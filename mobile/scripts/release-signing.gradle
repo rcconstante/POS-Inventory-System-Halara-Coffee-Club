@@ -1,0 +1,20 @@
+import groovy.json.JsonSlurper
+
+// Local builds use the same private keystore as EAS, never a debug signing key.
+gradle.beforeProject { app ->
+  app.plugins.withId('com.android.application') {
+    app.androidComponents.finalizeDsl { android ->
+      def credentialsFile = new File(app.rootProject.projectDir.parentFile, 'credentials.json')
+      if (!credentialsFile.isFile()) {
+        throw new GradleException('Download Android credentials from EAS to mobile/credentials.json before a local release build.')
+      }
+      def credentials = new JsonSlurper().parse(credentialsFile).android.keystore
+      def config = android.signingConfigs.maybeCreate('halaraRelease')
+      config.storeFile = new File(credentialsFile.parentFile, credentials.keystorePath)
+      config.storePassword = credentials.keystorePassword
+      config.keyAlias = credentials.keyAlias
+      config.keyPassword = credentials.keyPassword
+      android.buildTypes.release.signingConfig = config
+    }
+  }
+}
