@@ -45,3 +45,4 @@ credentials.json
 /builds/
 /modules/*/android/build/
 /modules/*/android/.cxx/
+/modules/*/android/.gradle/

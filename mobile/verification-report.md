@@ -36,8 +36,13 @@ current-tab semantics, keyboard behavior and image recovery.
 
 - Web production build, mobile TypeScript and Expo lint pass.
 - Expo doctor passes all 21 checks.
-- Eight protocol/bridge tests pass, including receipt totals, tender/change,
-  trusted origins, response matching, errors and timeouts without retries.
+- Twenty protocol, bridge, printer-service and checkout tests pass. The October
+  16 printing audit adds saved-printer reuse, first-use selection, Android
+  permission handling, selection cancellation, concurrent requests, manual
+  recovery after transmission failure, auto-print default/settings, save-before-
+  print ordering and preservation of the payment reference on retry. Tests run
+  the production TypeScript functions with substituted OS/native/API boundaries;
+  they do not communicate with a physical printer or create live sales.
 - The custom printer module's native lint report contains zero errors. Four
   optional Android KTX style suggestions remain.
 - Android 1.0.1 (version code 2) builds successfully. Its signature matches
@@ -55,6 +60,18 @@ current-tab semantics, keyboard behavior and image recovery.
   The custom module now treats lint errors as build failures.
 
 ## Required real-tablet acceptance
+
+The October 16 code audit found no additional failure in the tested dispatch
+path; no printer implementation or APK binary changed in that audit. Version
+1.0.1 remains the current APK. Its fixed 576-dot ESC/POS raster output targets
+80mm Bluetooth Classic SPP printers, including the intended RP30A-UB. It is not
+universal printer support, and compatibility with that physical unit remains
+unverified. USB, Wi-Fi, BLE-only and 58mm native printing are not implemented.
+
+The connection and raster approach was checked against Android's
+[Bluetooth connection documentation](https://developer.android.com/develop/connectivity/bluetooth/connect-bluetooth-devices)
+and Epson's [GS v 0 raster reference](https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lv_0.html).
+These document the protocol; they do not certify this third-party printer.
 
 Argent reports no connected Android device or local emulator. Browser checks
 and compilation do not prove native rendering or paper delivery. Install the

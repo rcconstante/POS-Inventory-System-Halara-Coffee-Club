@@ -12,6 +12,12 @@ including Unicode product names, payment method, cashier, tender, and change.
 The fixed 576-dot content width targets the RP30A-UB's 80mm hardware. It does not
 use Chrome's print dialog, Android's print queue, or RTPrinter System.
 
+Compatibility requires Bluetooth Classic SPP and ESC/POS raster support with
+a 576-dot print area. The current formatter targets 80mm printers. A Bluetooth
+name alone does not establish compatibility: 58mm, BLE-only, USB and Wi-Fi
+printers are not supported by this native transport. Changing printers requires
+selecting the new paired device once in Receipt printer setup.
+
 ## Install and connect
 
 1. Install the signed preview APK on the tablet. Android 7 or newer is required.
@@ -40,7 +46,10 @@ npx expo export --platform android
 ```
 
 From the repository root with Node 24, run `node --test tests/*.test.mjs` for
-receipt validation, origin restrictions, bridge responses, and timeout checks.
+receipt validation, origin restrictions, bridge responses, timeout checks,
+saved-printer reuse, permission failures, cancellation, duplicate-tap protection,
+and checkout auto-print ordering. These tests substitute the native transport
+boundary; they do not establish physical printer compatibility or paper delivery.
 
 The custom Bluetooth module requires a native build; Expo Go cannot run it.
 Use `npm run android` for a local native development build. `npm start` runs
