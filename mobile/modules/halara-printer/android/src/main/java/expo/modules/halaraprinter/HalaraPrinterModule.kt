@@ -15,9 +15,11 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.IOException
+import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 class HalaraPrinterModule : Module() {
   private data class PairedPrinter(val device: BluetoothDevice, val name: String, val address: String)
@@ -90,13 +92,31 @@ class HalaraPrinterModule : Module() {
           ?: throw IllegalStateException("The saved printer is no longer paired. Open Receipt printer setup.")
         val socket = device.createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805f9b34fb"))
         activeSocket = socket
-        val timeout = timer.schedule({ try { socket.close() } catch (_: IOException) {} }, 45, TimeUnit.SECONDS)
+        val startedAt = System.nanoTime()
+        val lastWrite = AtomicLong(startedAt)
+        // A long, progressing receipt must not be cut off by the connection timeout.
+        val timeout = timer.scheduleWithFixedDelay({
+          val now = System.nanoTime()
+          if (now - lastWrite.get() >= TimeUnit.SECONDS.toNanos(45) || now - startedAt >= TimeUnit.MINUTES.toNanos(15)) {
+            try { socket.close() } catch (_: IOException) {}
+          }
+        }, 1, 1, TimeUnit.SECONDS)
         var startedWriting = false
         try {
           socket.connect()
           startedWriting = true
-          ReceiptRenderer.print(receipt, socket.outputStream)
-          socket.outputStream.flush()
+          lastWrite.set(System.nanoTime())
+          val destination = socket.outputStream
+          val output = object : OutputStream() {
+            override fun write(value: Int) { destination.write(value); lastWrite.set(System.nanoTime()) }
+            override fun write(bytes: ByteArray, offset: Int, length: Int) {
+              destination.write(bytes, offset, length)
+              lastWrite.set(System.nanoTime())
+            }
+            override fun flush() { destination.flush() }
+          }
+          ReceiptRenderer.print(receipt, output)
+          output.flush()
         } catch (error: SecurityException) {
           throw IllegalStateException("Allow Nearby devices permission in Android Settings before printing.", error)
         } catch (error: IOException) {

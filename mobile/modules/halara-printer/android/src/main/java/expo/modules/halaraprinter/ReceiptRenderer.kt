@@ -58,7 +58,8 @@ object ReceiptRenderer {
   private const val PADDING = 12f
 
   fun print(receipt: ReceiptData, output: OutputStream) {
-    output.write(byteArrayOf(0x1b, 0x40))
+    val writer = EscPosWriter(output)
+    writer.initialize()
     val format = NumberFormat.getNumberInstance(Locale.US).apply { minimumFractionDigits = 2; maximumFractionDigits = 2 }
     fun money(value: Long): String = "PHP ${format.format(value / 100.0)}"
     for (copy in listOf("CUSTOMER COPY", "STORE COPY")) {
@@ -81,10 +82,13 @@ object ReceiptRenderer {
       receipt.cashReceived?.let { row(output, "Cash received", right = money(it)) }
       receipt.change?.let { row(output, "Change", right = money(it)) }
       wrapped(output, "Thank you for visiting Halara Coffee Club.", centered = true)
-      output.write(byteArrayOf(0x1b, 0x64, 0x03))
-      if (copy == "CUSTOMER COPY") { rule(output); row(output, "CUT HERE", centered = true); rule(output) }
+      if (copy == "CUSTOMER COPY") {
+        writer.feed(160)
+        row(output, "TEAR HERE", centered = true)
+        writer.feed(160)
+      }
     }
-    output.write(byteArrayOf(0x1b, 0x64, 0x04))
+    writer.feed(320)
   }
 
   private fun paint(bold: Boolean, size: Float): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -143,7 +147,6 @@ object ReceiptRenderer {
         data[index] = (data[index].toInt() or (0x80 shr (x % 8))).toByte()
       }
     }
-    output.write(byteArrayOf(0x1d, 0x76, 0x30, 0x00, widthBytes.toByte(), 0, (bitmap.height and 255).toByte(), (bitmap.height shr 8).toByte()))
-    output.write(data)
+    EscPosWriter(output).raster(widthBytes, bitmap.height, data)
   }
 }

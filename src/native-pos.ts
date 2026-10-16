@@ -32,7 +32,7 @@ function send(request: NativeRequest): Promise<string> {
     const timer = window.setTimeout(() => {
       pending.delete(request.id);
       reject(new Error("The printer did not respond. Check its connection before retrying; do not repeat a payment."));
-    }, 90_000);
+    }, request.action === "print" ? 16 * 60_000 : 90_000);
     pending.set(request.id, { resolve, reject, timer });
     try { window.ReactNativeWebView!.postMessage(JSON.stringify(request)); }
     catch (error) { window.clearTimeout(timer); pending.delete(request.id); reject(error); }

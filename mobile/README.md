@@ -12,6 +12,16 @@ including Unicode product names, payment method, cashier, tender, and change.
 The fixed 576-dot content width targets the RP30A-UB's 80mm hardware. It does not
 use Chrome's print dialog, Android's print queue, or RTPrinter System.
 
+Version 1.0.2 sends raster images in eight-row commands (at most 584 bytes),
+flushing and waiting 60ms between commands to reduce printer buffer overruns.
+Both copies still print automatically: customer first, a TEAR HERE marker with
+20mm blank feed on either side, then store. The last copy gets about 40mm feed.
+Distances assume the target printer's 203dpi head. No cutter command is sent.
+Printing is intentionally slower than 1.0.1. A stalled connection times out
+after 45 seconds without write progress; a job has a 15-minute safety limit.
+The web bridge waits up to 16 minutes for printing, keeping duplicate-tap
+protection active while a long job is progressing.
+
 Compatibility requires Bluetooth Classic SPP and ESC/POS raster support with
 a 576-dot print area. The current formatter targets 80mm printers. A Bluetooth
 name alone does not establish compatibility: 58mm, BLE-only, USB and Wi-Fi
@@ -50,6 +60,9 @@ receipt validation, origin restrictions, bridge responses, timeout checks,
 saved-printer reuse, permission failures, cancellation, duplicate-tap protection,
 and checkout auto-print ordering. These tests substitute the native transport
 boundary; they do not establish physical printer compatibility or paper delivery.
+Native encoder tests run with `gradlew :halara-printer:testReleaseUnitTest` from
+the generated Android project. They verify raster packet lengths, pixel-byte
+preservation, pacing, paper-feed commands and failure behavior without hardware.
 
 The custom Bluetooth module requires a native build; Expo Go cannot run it.
 Use `npm run android` for a local native development build. `npm start` runs

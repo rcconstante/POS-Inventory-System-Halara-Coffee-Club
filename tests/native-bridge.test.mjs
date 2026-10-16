@@ -8,6 +8,7 @@ import * as protocol from '../shared/native-protocol.ts';
 function bridge({ native = true, origin = protocol.POS_ORIGIN } = {}) {
   const listeners = new Map();
   const timers = new Map();
+  const delays = [];
   const messages = [];
   let timerId = 0;
   const window = {
@@ -15,7 +16,7 @@ function bridge({ native = true, origin = protocol.POS_ORIGIN } = {}) {
     HalaraNative: { version: 1 },
     ...(native ? { ReactNativeWebView: { postMessage: (value) => messages.push(JSON.parse(value)) } } : {}),
     addEventListener: (name, listener) => listeners.set(name, listener),
-    setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
+    setTimeout: (callback, delay) => { delays.push(delay); timers.set(++timerId, callback); return timerId; },
     clearTimeout: (id) => timers.delete(id),
   };
   const exports = {};
@@ -26,7 +27,7 @@ function bridge({ native = true, origin = protocol.POS_ORIGIN } = {}) {
     exports, window, location: { search: '?halaraApp=staff' }, URLSearchParams,
     crypto: { randomUUID: () => 'test-request' }, require: () => protocol,
   });
-  return { api: exports, messages, timers, reply: (detail) => listeners.get('halara-native-response')({ detail }) };
+  return { api: exports, messages, timers, delays, reply: (detail) => listeners.get('halara-native-response')({ detail }) };
 }
 
 test('ordinary browsers and other origins cannot invoke the native printer', async () => {
@@ -65,4 +66,25 @@ test('a missing response times out with payment-safe guidance and no duplicate r
   [...target.timers.values()][0]();
   await rejection;
   assert.equal(target.messages.length, 1);
+});
+
+test('paced printing has a longer response window than one-time printer selection', async () => {
+  const setup = bridge();
+  const selected = setup.api.selectNativePrinter();
+  assert.deepEqual(setup.delays, [90_000]);
+  setup.reply({ version: 1, id: 'test-request', success: true, message: 'Saved' });
+  await selected;
+
+  const target = bridge();
+  const printed = target.api.printNativeReceipt({
+    receipt: 'RC-2026-12345678', status: 'Completed', dateTime: 'Oct 16, 2026',
+    cashier: 'Staff', payment: 'GCash', totalCentavos: 10000,
+    cashReceivedCentavos: null, changeCentavos: null,
+    items: [{ name: 'Coffee', quantity: 1, unitPriceCentavos: 10000 }],
+  });
+  assert.equal(target.messages[0].action, 'print');
+  assert.deepEqual(target.delays, [16 * 60_000]);
+  target.reply({ version: 1, id: 'test-request', success: true, message: 'Sent' });
+  assert.equal(await printed, 'Sent');
+  assert.equal(target.timers.size, 0);
 });

@@ -1,4 +1,4 @@
-# Staff app verification — October 14, 2026
+# Staff app verification — October 16, 2026
 
 The Android app loads the production Halara staff POS in a restricted WebView.
 Staff authentication, products, inventory, shifts and orders use the same
@@ -36,18 +36,23 @@ current-tab semantics, keyboard behavior and image recovery.
 
 - Web production build, mobile TypeScript and Expo lint pass.
 - Expo doctor passes all 21 checks.
-- Twenty protocol, bridge, printer-service and checkout tests pass. The October
+- Twenty-one protocol, bridge, printer-service and checkout tests pass. The October
   16 printing audit adds saved-printer reuse, first-use selection, Android
   permission handling, selection cancellation, concurrent requests, manual
   recovery after transmission failure, auto-print default/settings, save-before-
   print ordering and preservation of the payment reference on retry. Tests run
   the production TypeScript functions with substituted OS/native/API boundaries;
   they do not communicate with a physical printer or create live sales.
+- Four native JVM encoder tests pass: complete raster byte preservation and
+  correct band lengths/pacing, exact feed commands without cutting, malformed
+  image rejection, and write failure without retries.
 - The custom printer module's native lint report contains zero errors. Four
   optional Android KTX style suggestions remain.
-- Android 1.0.1 (version code 2) builds successfully. Its signature matches
-  1.0.0, and APK inspection confirms the production site URL, native printer
-  bridge, ARM64/ARMv7 libraries and Android 7 minimum.
+- Android 1.0.2 (version code 3) builds successfully, including the final
+  timeout scheduling adjustment. Its signing certificate matches 1.0.1 and
+  1.0.0, so it can update the installed app. APK metadata confirms ARM64/ARMv7
+  libraries and Android 7 minimum. SHA-256:
+  `fe2523d366295cff7422125e054624f8bc673d32de0443c088be509cbcb7d3c2`.
 - The full dependency lint scan crashes in the upstream Worklets Kotlin lint
   analyzer (`Cannot find a KaModule for the VirtualFile`). The custom module
   was checked separately with the two upstream dependency-analysis tasks
@@ -61,12 +66,29 @@ current-tab semantics, keyboard behavior and image recovery.
 
 ## Required real-tablet acceptance
 
-The October 16 code audit found no additional failure in the tested dispatch
-path; no printer implementation or APK binary changed in that audit. Version
-1.0.1 remains the current APK. Its fixed 576-dot ESC/POS raster output targets
-80mm Bluetooth Classic SPP printers, including the intended RP30A-UB. It is not
-universal printer support, and compatibility with that physical unit remains
-unverified. USB, Wi-Fi, BLE-only and 58mm native printing are not implemented.
+The user subsequently supplied a photo of paper output with readable receipt
+sections mixed with garbled binary-looking text. This demonstrates some physical
+output, but not successful printing of complete, clean receipts. Buffer overrun
+or raster-command desynchronization is an inference from that pattern, not a
+confirmed hardware diagnosis.
+
+Version 1.0.2 addresses the unpaced raster stream: each command contains at most
+eight rows/584 bytes, with a flush and 60ms pacing delay. Encoder tests verify
+the declared payload sizes and preservation of every pixel byte across bands,
+including a final partial band. Initialization and feed commands use the same
+paced writer. Customer and store copies remain automatic, with a TEAR HERE
+marker and about 20mm blank feed on each side. The final copy gets about 40mm
+feed (assuming 203dpi). No cutter command is sent.
+
+The former fixed 45-second job timer could interrupt long paced receipts. It now
+checks for 45 seconds without write progress, with a 15-minute maximum job
+duration. The bridge waits 16 minutes for printing and retains the shorter
+90-second setup timeout. No interrupted job is automatically retried.
+
+The fixed 576-dot ESC/POS raster output targets 80mm Bluetooth Classic SPP
+printers, including the intended RP30A-UB. It is not universal printer support.
+Clean paper output with version 1.0.2 remains unverified. USB, Wi-Fi, BLE-only
+and 58mm native printing are not implemented.
 
 The connection and raster approach was checked against Android's
 [Bluetooth connection documentation](https://developer.android.com/develop/connectivity/bluetooth/connect-bluetooth-devices)
@@ -75,8 +97,9 @@ These document the protocol; they do not certify this third-party printer.
 
 Argent reports no connected Android device or local emulator. Browser checks
 and compilation do not prove native rendering or paper delivery. Install the
-updated APK, cancel old Android print jobs, close RTPrinter, pair the RP30A-UB,
-and select it once through Account → Receipt printer setup.
+updated APK, cancel old Android print jobs, close RTPrinter, power-cycle the
+printer to clear residual data, and select the paired RP30A-UB once through
+Account → Receipt printer setup if it was not already saved.
 
 Verify staff login and navigation, cash and digital receipt copies, auto-print,
 an older order reprint, permission denial/recovery, printer-off recovery, and

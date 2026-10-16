@@ -24,12 +24,14 @@ native controls. Internet remains required for authentication and transactions.
 
 ## Verification
 
-Status recorded October 14, 2026.
+Status updated October 16, 2026.
 
 - Web production build and mobile TypeScript/lint checks pass.
 - Expo doctor passes all 21 checks; Android JavaScript export passes.
-- Eight protocol/bridge tests cover origin isolation, totals, tender/change,
-  response matching, native errors, and timeouts without automatic retries.
+- Twenty-one JavaScript tests cover origin isolation, totals, tender/change,
+  response matching, native errors, saved-printer reuse, duplicate taps,
+  checkout ordering and timeouts without automatic retries. Four native JVM
+  tests cover raster packet integrity, pacing, paper feed and write failures.
 - Signed Android release build succeeds, including native Kotlin compilation
   and release checks. APK inspection confirms the custom printer module,
   Hermes bundle, ARM64/ARMv7 libraries, Android 7 minimum, and EAS signing key.
@@ -41,7 +43,9 @@ Status recorded October 14, 2026.
   through the bridge, and native mode hides the role chooser and PWA install.
   The bridge destination is substituted in this test; it does not exercise a
   physical Bluetooth connection or establish native runtime parity.
-- Native runtime parity and physical printing are pending a connected tablet.
+- The user's paper-output photo shows readable sections with garbled blocks.
+  Version 1.0.2 adds smaller paced raster commands and larger tear gaps; clean
+  output and native runtime parity remain pending a connected tablet.
   Argent reports no connected devices or local AVDs, and EAS Simulator is not
   available for this account. Export/compilation does not prove runtime parity.
 - Acceptance steps for real hardware are in README.md. No test payment is

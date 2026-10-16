@@ -6,6 +6,10 @@ plugins {
 group = 'expo.modules.halaraprinter'
 version = '0.1.0'
 
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}
+
 android {
   namespace "expo.modules.halaraprinter"
   lint {
