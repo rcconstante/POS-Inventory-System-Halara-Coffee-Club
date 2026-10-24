@@ -1,4 +1,5 @@
 import "./styles.css";
+import { cropPaymentQr } from "./payment-qr";
 import { isNativePos, printNativeReceipt, selectNativePrinter } from "./native-pos";
 import { beginReceiptPrint, endReceiptPrint, requestReceiptPrint, syncReceiptPrint } from "./receipt-printing";
 import {
@@ -10,7 +11,7 @@ import {
 import {
   api, type AppData, type CashShift, type Category, type InventoryReport, type NotificationItem, type PaymentMethod, type Product,
   type ReportSummary, type Sale, type SaleStatus, type UserRole,
-  type UserSession,
+  type UserSession, type DigitalPaymentMethod, type PaymentQrSettings,
 } from "./api";
 
 const logoUrl = new URL("../assets/Logo.webp", import.meta.url).href;
@@ -60,6 +61,8 @@ interface UiState {
   loading: boolean;
   cart: CartItem[];
   selectedPayment: PaymentMethod | null;
+  paymentQr: PaymentQrSettings;
+  paymentQrError: string | null;
   cashReceived: number | null;
   paymentReference: string | null;
   completedSale: Sale | null;
@@ -100,6 +103,8 @@ const ui: UiState = {
   loading: true,
   cart: [],
   selectedPayment: null,
+  paymentQr: { GCash: null, Maya: null },
+  paymentQrError: null,
   cashReceived: null,
   paymentReference: null,
   completedSale: null,
@@ -124,6 +129,7 @@ let installPrompt: InstallPromptEvent | null = null;
 let notificationTrigger: HTMLButtonElement | null = null;
 let intentionalLogout = false;
 let paymentSaving = false;
+let paymentPreparing = false;
 
 api.subscribeSessionExpiry(() => {
   if (!ui.session || intentionalLogout) return;
@@ -363,8 +369,10 @@ async function bootstrap(): Promise<void> {
 
 async function refreshAll(shouldRender = true): Promise<void> {
   if (!refreshPromise) {
-    refreshPromise = Promise.all([api.appData(), api.notifications()]).then(([data, notificationData]) => {
+    refreshPromise = Promise.all([api.appData(), api.notifications(), api.paymentQrSettings().then((images) => ({ images, error: null as string | null })).catch((error: unknown) => ({ images: { GCash: null, Maya: null }, error: errorMessage(error) }))]).then(([data, notificationData, qr]) => {
       ui.data = data;
+      ui.paymentQr = qr.images;
+      ui.paymentQrError = qr.error;
       ui.notifications = notificationData.notifications;
       ui.unread = notificationData.unread;
     }).finally(() => { refreshPromise = null; });
@@ -385,7 +393,7 @@ function startRealtimeSync(): void {
           if (ui.reportTab === "sales") ui.report = await api.report(ui.reportRange.from, ui.reportRange.to);
           else ui.inventoryReport = await api.inventoryReport(ui.reportRange.from, ui.reportRange.to);
         }
-        if (!modalRoot.children.length) render();
+        if (!modalRoot.children.length && !document.querySelector('[data-qr-dirty="true"]')) render();
       } catch { /* Supabase reconnects the channel; the next event retries. */ }
     }, 180);
   });
@@ -655,6 +663,7 @@ function renderSettings(): string {
     <div class="settings-heading"><div><p class="eyebrow">Account</p><h2>Account &amp; Settings</h2><span>Manage your profile and password.</span></div></div>
     <div class="settings-stack">
       <article class="settings-card"><div class="settings-card-heading"><div><p class="eyebrow">Basic details</p><h3>Personal information</h3><span>Update the name and photo shown across the workspace.</span></div></div><form id="profile-form" class="profile-form" enctype="multipart/form-data"><div class="profile-avatar-upload"><div class="profile-avatar-preview" id="avatar-preview">${avatarMarkup(session, "settings-avatar")}</div><label class="button secondary" for="avatar-input">${icon("Upload")} Change photo</label><input id="avatar-input" name="avatar" type="file" accept="image/jpeg,image/png,image/webp" /><small>JPG, PNG or WebP · max 5 MB</small><label class="remove-avatar"><input name="removeAvatar" type="checkbox" value="true" ${session.avatarUrl ? "" : "disabled"} /> Remove photo</label></div><div class="profile-fields"><label class="field"><span>First name</span><input name="firstName" value="${escapeHtml(firstName)}" maxlength="40" required /></label><label class="field"><span>Last name</span><input name="lastName" value="${escapeHtml(lastName)}" maxlength="40" /></label><label class="field wide"><span>Email address</span><input value="${escapeHtml(session.email)}" readonly /></label><div class="profile-actions wide"><p class="form-message" id="profile-message"></p><button class="button primary profile-save" type="submit">${icon("Check")} Save profile</button></div></div></form></article>
+      ${paymentQrSettingsCard("GCash")}${paymentQrSettingsCard("Maya")}
       <article class="settings-card settings-password"><div class="settings-card-heading"><div><p class="eyebrow">Security</p><h3>Password</h3><span>Use a strong password to protect this account.</span></div>${icon("ShieldCheck")}</div>${passwordForm("admin-password-form")}</article>
     </div>
   </section>`;
@@ -692,6 +701,7 @@ function bindAdmin(): void {
   bindFilters();
   bindPasswordForm("#admin-password-form");
   bindProfileForm();
+  bindPaymentQrSettings("GCash"); bindPaymentQrSettings("Maya");
 }
 
 function bindRouteButtons(): void {
@@ -785,10 +795,10 @@ function renderStaff(): void {
   const hideNav = ["cart", "payment", "success"].includes(ui.staffView);
   app.innerHTML = `<main class="staff-app" id="main-content"><header class="staff-topbar"><img src="${logoUrl}" alt="Company logo" /><div><div class="notification-wrap"><button class="notification-button" data-action="notifications" aria-label="Open notifications" aria-expanded="${ui.notificationsOpen}">${icon("Bell")}<b data-notification-count>${ui.unread || ""}</b></button>${ui.notificationsOpen ? renderNotificationPopover() : ""}</div><button class="staff-account" data-staff-view="account">${avatarMarkup(session)}<strong>${escapeHtml(session.displayName)}</strong></button></div></header><section class="staff-stage">${renderStaffView()}</section>${hideNav ? "" : staffBottomNav()}</main>`;
   hydrate(app); bindStaff();
-  if (paymentSaving) {
+  if (paymentSaving || paymentPreparing) {
     app.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button,input').forEach((control) => { control.disabled = true; });
     const confirm = app.querySelector<HTMLButtonElement>('[data-action="confirm-payment"]');
-    if (confirm) setButtonBusy(confirm, true, "Saving payment");
+    if (confirm) setButtonBusy(confirm, true, paymentPreparing ? "Loading QR" : "Saving payment");
   }
 }
 
@@ -859,7 +869,92 @@ function renderPayment(): string {
   const received = ui.cashReceived ?? 0;
   const cashValid = ui.selectedPayment !== "Cash" || received + Number.EPSILON >= total;
   const cashFields = ui.selectedPayment === "Cash" ? `<div class="cash-payment-fields"><label class="field"><span>Cash received (PHP)</span><input id="cash-received" type="text" value="${formatCashInputAmount(ui.cashReceived)}" placeholder="0.00" inputmode="decimal" autocomplete="off" required /></label><div><span>Change</span><strong id="cash-change">${money.format(Math.max(0, received - total))}</strong></div><div class="cash-quick"><button type="button" data-cash-amount="${total}">Exact</button>${[100, 200, 500, 1000, 2000, 5000].filter((amount) => amount >= total).map((amount) => `<button type="button" data-cash-amount="${amount}">${money.format(amount)}</button>`).join("")}</div></div>` : "";
-  return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart" aria-label="Back to cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(total)}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div>${cashFields}<div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment && cashValid ? "" : "disabled"}>Confirm payment</button></div></article></div>`;
+  const digital = ui.selectedPayment === "GCash" || ui.selectedPayment === "Maya" ? ui.selectedPayment : null;
+  const qrMessage = digital ? `<p class="payment-qr-note">${ui.paymentQrError ? "Payment QR settings could not be loaded. Tap below to retry." : ui.paymentQr[digital] ? "Show the QR to the customer, then confirm only after the payment arrives in your account." : "Confirm only after checking that the payment arrived in your account."}</p>` : "";
+  const label = digital ? (ui.paymentQrError ? `Retry ${digital}` : ui.paymentQr[digital] ? "Show QR" : "Confirm payment") : "Confirm payment";
+  return `<div class="staff-flow payment-flow"><div class="flow-header"><button data-staff-view="cart" aria-label="Back to cart">${icon("ArrowLeft")}</button><div><p>Checkout</p><h1>Select payment method</h1></div><span></span></div><article class="payment-card"><div class="payment-total"><small>Total amount</small><strong>${money.format(total)}</strong></div><div class="payment-options">${paymentOption("Cash", cashLogoUrl)}${paymentOption("GCash", gcashLogoUrl)}${paymentOption("Maya", mayaLogoUrl)}</div>${cashFields}${qrMessage}<div class="payment-actions"><button class="button secondary" data-staff-view="cart">Cancel</button><button class="button primary" data-action="confirm-payment" ${ui.selectedPayment && cashValid ? "" : "disabled"}>${label}</button></div></article></div>`;
+}
+
+async function beginPayment(): Promise<void> {
+  if (paymentPreparing || paymentSaving || !ui.selectedPayment || !ui.cart.length) return;
+  if (ui.session?.role !== "staff") return;
+  const sessionId = ui.session.id;
+  if (ui.selectedPayment === "Cash") { await confirmPayment(); return; }
+  const method = ui.selectedPayment;
+  let image: string | null;
+  paymentPreparing = true;
+  renderStaff();
+  try {
+    ui.paymentQr = await api.paymentQrSettings();
+    image = ui.paymentQr[method];
+    ui.paymentQrError = null;
+  } catch (error) {
+    ui.paymentQrError = errorMessage(error);
+    throw error;
+  } finally { paymentPreparing = false; if (ui.session?.role === "staff") renderStaff(); }
+  if (ui.session?.id !== sessionId || ui.session.role !== "staff") return;
+  if (!image) { await confirmPayment(); return; }
+  const total = cartTotal();
+  const cartSnapshot = JSON.stringify(ui.cart);
+  openDialog({
+    title: `Pay with ${method}`, description: `Scan this QR using ${method}. Check the recipient before sending.`,
+    body: `<div class="payment-qr-checkout"><p class="qr-amount"><span>Amount to pay</span><strong>${money.format(total)}</strong></p><img class="payment-qr-image" src="${escapeHtml(image)}" alt="${method} payment QR" /><p>Staff: check your receiving account before confirming. A customer screenshot alone does not confirm payment.</p><label class="qr-confirm"><input type="checkbox" name="paymentReceived" required /><span>I checked our account and received the full payment.</span></label></div>`,
+    submitLabel: "Confirm payment",
+    onOpen: () => { document.querySelector<HTMLImageElement>('.payment-qr-checkout img')?.addEventListener("error", () => setDialogError("The QR could not load. Cancel and retry; no payment has been recorded."), { once: true }); },
+    onSubmit: async (form) => {
+      if (ui.session?.id !== sessionId || ui.selectedPayment !== method || cartTotal() !== total || JSON.stringify(ui.cart) !== cartSnapshot) throw new Error("The order or session changed. Cancel and reopen checkout before confirming payment.");
+      const qr = form.querySelector<HTMLImageElement>(".payment-qr-image");
+      if (!qr?.complete || !qr.naturalWidth) throw new Error("Wait for the QR to load, or cancel and retry.");
+      if (!form.querySelector<HTMLInputElement>('[name="paymentReceived"]')?.checked) throw new Error("Check your receiving account and confirm that the full payment arrived.");
+      closeDialog();
+      try { await confirmPayment(); } catch (error) { handleError(error); }
+    },
+  });
+}
+
+function paymentQrSettingsCard(method: DigitalPaymentMethod): string {
+  const prefix = method.toLowerCase();
+  const image = ui.paymentQr[method];
+  return `<article class="settings-card"><div class="settings-card-heading"><div><p class="eyebrow">Payments</p><h3>${method} payment QR</h3><span>Shared by the web POS and staff app. Staff confirm payments manually.</span></div></div><form id="${prefix}-qr-form"><div class="qr-settings-layout"><div data-qr-preview>${image ? `<img class="payment-qr-image" src="${escapeHtml(image)}" alt="Current ${method} payment QR" />` : `<p class="payment-qr-note">No QR saved. ${method} uses the existing confirmation flow.</p>`}</div><div class="qr-settings-controls"><label class="field"><span>Upload ${method} QR photo</span><input id="${prefix}-qr-file" type="file" accept="image/png,image/jpeg,image/webp" /></label><p class="payment-qr-note">JPG, PNG or WebP · max 5 MB. We find and crop the QR automatically, keeping a white scanning border. Verify the recipient with ${method} before using it.</p><p data-qr-message class="form-message" role="status">${ui.paymentQrError ? escapeHtml(ui.paymentQrError) : ""}</p><div class="qr-settings-actions"><button type="button" class="button secondary" data-remove-qr ${image ? "" : "disabled"}>${icon("Trash2")} Remove QR</button><button type="submit" class="button primary" ${ui.paymentQrError ? "disabled" : ""}>${icon("Check")} Save QR</button></div></div></div></form></article>`;
+}
+
+function bindPaymentQrSettings(method: DigitalPaymentMethod): void {
+  const form = document.querySelector<HTMLFormElement>(`#${method.toLowerCase()}-qr-form`);
+  if (!form) return;
+  const input = form.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const remove = form.querySelector<HTMLButtonElement>('[data-remove-qr]')!;
+  const save = form.querySelector<HTMLButtonElement>('[type="submit"]')!;
+  const preview = form.querySelector<HTMLElement>('[data-qr-preview]')!;
+  const message = form.querySelector<HTMLElement>('[data-qr-message]')!;
+  let pending = ui.paymentQr[method];
+  let busy = false;
+  const controls = (disabled: boolean): void => { input.disabled = save.disabled = disabled; remove.disabled = disabled || !pending; };
+  const show = (): void => { preview.innerHTML = pending ? `<img class="payment-qr-image" src="${escapeHtml(pending)}" alt="${method} QR preview" />` : `<p class="payment-qr-note">No QR selected. Save to use the existing ${method} confirmation flow.</p>`; };
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0]; if (!file || busy) return;
+    form.dataset.qrDirty = "true";
+    busy = true; controls(true); message.textContent = "Finding and verifying the QR…";
+    try {
+      const image = await cropPaymentQr(file);
+      if (!form.isConnected) return;
+      pending = image; form.dataset.qrDirty = "true"; show(); message.textContent = "QR cropped and verified. Save QR to apply it to all devices.";
+    } catch (error) { if (form.isConnected) message.textContent = errorMessage(error); }
+    finally { busy = false; controls(false); input.value = ""; }
+  });
+  remove.addEventListener("click", () => { if (busy) return; pending = null; form.dataset.qrDirty = "true"; show(); message.textContent = "Save QR to remove it from checkout on all devices."; controls(false); });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault(); if (busy) return; busy = true; controls(true); message.textContent = "Saving QR…";
+    try {
+      await api.setPaymentQr(method, pending);
+      ui.paymentQr[method] = pending;
+      ui.paymentQrError = null;
+      form.dataset.qrDirty = "false";
+      message.textContent = `${method} QR settings saved for all devices.`;
+      toast(`${method} QR settings saved for all devices.`, "success");
+    }
+    catch (error) { message.textContent = errorMessage(error); }
+    finally { busy = false; controls(false); }
+  });
 }
 
 function paymentOption(method: PaymentMethod, logo: string): string {
@@ -970,7 +1065,7 @@ function bindStaff(): void {
   onAction("cart-minus", (button) => changeCart(button.dataset.id!, -1));
   onAction("cart-plus", (button) => changeCart(button.dataset.id!, 1));
   onAction("clear-cart", () => { ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null; persistPosState(); renderStaff(); });
-  onAction("confirm-payment", confirmPayment);
+  onAction("confirm-payment", beginPayment);
   document.querySelector<HTMLInputElement>("#autoprint-toggle")?.addEventListener("change", (event) => {
     setAutoPrint((event.currentTarget as HTMLInputElement).checked);
   });
@@ -1377,7 +1472,10 @@ function closeDialog(): void {
   dialogReturnFocus = null;
   syncReceiptPrint(document);
 }
-function setDialogError(message: string): void { setText("#dialog-error", message); }
+function setDialogError(message: string): void {
+  setText("#dialog-error", message);
+  if (message && modalRoot.querySelector(".payment-qr-checkout")) document.querySelector("#dialog-error")?.scrollIntoView({ block: "nearest" });
+}
 
 async function completeMutation(message: string): Promise<void> {
   closeDialog(); await refreshAll(false); ui.report = null; render(); toast(message, "success");
@@ -1576,7 +1674,7 @@ window.addEventListener("beforeprint", () => { beginReceiptPrint(document); });
 window.addEventListener("afterprint", () => { endReceiptPrint(document); });
 
 window.addEventListener("popstate", () => {
-  if (paymentSaving) { syncLocation(true); return; }
+  if (paymentSaving || paymentPreparing) { syncLocation(true); return; }
   if (modalRoot.childElementCount) {
     if (dialogIsSaving()) { syncLocation(true); return; }
     closeDialog();

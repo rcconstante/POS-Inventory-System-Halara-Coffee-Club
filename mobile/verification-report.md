@@ -1,4 +1,35 @@
-# Staff app verification — October 16, 2026
+# Staff app verification — October 24, 2026
+
+## Version 1.0.3 — shared GCash and Maya QR
+
+- 31 JavaScript tests pass, including method-specific QR selection, manual
+  acknowledgement, image loading failure, no-QR fallback, session expiry,
+  changed-cart rejection and the existing receipt/auto-print checks.
+- Web production build and mobile typecheck/lint pass. The QR decoder is lazy
+  loaded. Compatible dependency patches also clear the four npm audit findings;
+  the web dependency audit now reports zero vulnerabilities.
+- The supplied image is cropped and decoded before/after processing with an
+  identical payload. It seeds GCash only. Maya is empty until an admin uploads
+  its own image. Each method has independent admin settings and removal.
+- Browser checks cover desktop, portrait tablet and narrow-screen QR dialogs,
+  admin photo upload/removal, shared settings after reload, failure recovery,
+  cancellation and existing browser/native receipt dispatch. Settings and sale
+  writes are intercepted; no real sale or wallet-routing change is made by QA.
+  Simulated successful GCash and Maya sales also reach the receipt and native
+  auto-print bridge with matching payment methods and totals. QR confirmation
+  controls remain visible at 1280×800, 800×1280 and 390×844.
+- Live migration 010 permissions were checked: staff read succeeds, staff RPC
+  changes and direct updates are denied, anonymous reads are denied, and server
+  PNG validation accepts the crop and rejects external URLs/SVG/truncated PNG.
+  Migration 011 adds Maya; verify it is applied before publishing the UI.
+- Signed APK 1.0.3 (version code 4) builds successfully. Its certificate matches
+  prior releases, supports ARM64/ARMv7 and Android 7+, and the four native raster
+  encoder tests pass. APK SHA-256:
+  `e64a33fb8ee187932afd335a673a097976bc0bdce62d82a7405ff9b6a245a00c`.
+- Printer transport, pacing and tear feed are unchanged from 1.0.2. Actual
+  tablet file picking and clean physical printing still require hardware QA.
+
+## Earlier printing and shared-screen verification
 
 The Android app loads the production Halara staff POS in a restricted WebView.
 Staff authentication, products, inventory, shifts and orders use the same

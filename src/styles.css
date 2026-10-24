@@ -461,6 +461,25 @@ span.settings-avatar { display: grid; place-items: center; }
 .order-total small { color: var(--muted); }
 .order-total span:last-child { padding-top: 9px; border-top: 1px solid var(--border); font-size: 1rem; }
 .payment-card { padding: 22px; background: white; border: 1px solid var(--border); border-radius: 13px; }
+.payment-qr-note, .payment-qr-checkout > p:not(.qr-amount) { color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.payment-qr-image { display: block; width: min(100%, 300px); height: auto; aspect-ratio: 1; object-fit: contain; margin: 0 auto; background: white; border: 1px solid var(--border); border-radius: 10px; }
+.payment-qr-checkout { display: grid; gap: 16px; }
+.payment-qr-checkout p { margin: 0; }
+.qr-amount { display: grid; gap: 4px; text-align: center; }
+.qr-amount span { color: var(--muted); font-size: .8rem; }
+.qr-amount strong { color: var(--brown-600); font-size: 1.8rem; }
+.qr-confirm { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: #faf8f6; font-size: .85rem; line-height: 1.5; }
+.qr-confirm input { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 2px; accent-color: var(--brown-600); }
+.qr-settings-layout { display: grid; grid-template-columns: minmax(160px, 260px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.qr-settings-controls { min-width: 0; }
+.qr-settings-controls input[type=file] { max-width: 100%; }
+.qr-settings-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.modal:has(.payment-qr-checkout) { display: flex; flex-direction: column; overflow: hidden; }
+.modal:has(.payment-qr-checkout) > header { flex: 0 0 auto; }
+#dialog-form:has(.payment-qr-checkout) { display: flex; flex-direction: column; min-height: 0; }
+.modal-body:has(.payment-qr-checkout) { overflow: auto; }
+#dialog-form:has(.payment-qr-checkout) > footer { flex: 0 0 auto; }
+@media (max-width: 600px) { .qr-settings-layout { grid-template-columns: 1fr; } .payment-qr-checkout .payment-qr-image { width: min(100%, 260px); } }
 .payment-total { display: grid; place-items: center; gap: 6px; margin-bottom: 23px; }
 .payment-total small { color: var(--muted); }
 .payment-total strong { color: var(--brown-700); font-size: 1.6rem; }

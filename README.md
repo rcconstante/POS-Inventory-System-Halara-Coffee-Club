@@ -10,7 +10,7 @@ operations, and image storage.
 1. Open the Supabase SQL Editor for the project.
 2. Run the SQL files in `supabase/migrations` in numeric order. Existing
    installations should apply every newer numbered migration they have not yet
-   run, through `009_project_keepalive.sql`.
+   run, through `011_maya_payment_qr.sql`.
 3. In **Authentication → Users**, create:
    - `r.constante.dev@gmail.com` with password `Admin@12345!`
    - `staff@halara.test` with password `Staff@12345!`

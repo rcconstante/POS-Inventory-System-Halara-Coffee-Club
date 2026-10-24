@@ -24,7 +24,14 @@ native controls. Internet remains required for authentication and transactions.
 
 ## Verification
 
-Status updated October 16, 2026.
+Status updated October 24, 2026.
+
+Version 1.0.3 adds shared GCash/Maya QR checkout and independent admin settings.
+The QR photo is cropped and decoded before/after processing. Manual payment
+acknowledgement precedes the existing sale, receipt and native auto-print flow.
+There are 31 passing JavaScript tests and four passing native encoder tests;
+browser QA exercises both QR methods and simulated successful receipts without
+writing live sales. Apply migrations 010 and 011 before publishing the UI.
 
 - Web production build and mobile TypeScript/lint checks pass.
 - Expo doctor passes all 21 checks; Android JavaScript export passes.

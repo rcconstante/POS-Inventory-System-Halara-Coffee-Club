@@ -6,6 +6,12 @@ inventory, order history, account settings, and Supabase RLS stay shared with th
 website. This is a native shell around the existing interface, not a separate
 rewrite of every screen. Internet is required for authentication and sales.
 
+Version 1.0.3 supports the shared GCash and Maya QR checkout. Admins manage
+each QR in web Settings; staff see the selected method's QR, check the receiving
+account and confirm payment before a sale/receipt is created. A method without
+a QR retains its existing confirmation flow. Apply database migrations 010 and
+011 before deploying the web update. See [payment QR setup](../docs/payment-qr.md).
+
 The local `halara-printer` Expo module connects directly to a paired Bluetooth
 Classic SPP printer. It sends ESC/POS raster commands for both receipt copies,
 including Unicode product names, payment method, cashier, tender, and change.

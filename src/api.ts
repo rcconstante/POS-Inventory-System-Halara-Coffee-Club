@@ -1,7 +1,10 @@
 import { createClient, type User } from "@supabase/supabase-js";
+import { isPaymentQrImage } from "./payment-qr";
 
 export type UserRole = "admin" | "staff";
 export type PaymentMethod = "Cash" | "GCash" | "Maya";
+export type DigitalPaymentMethod = Exclude<PaymentMethod, "Cash">;
+export type PaymentQrSettings = Record<DigitalPaymentMethod, string | null>;
 export type SaleStatus = "Completed" | "Cancelled";
 export type ProductType = "raw_material" | "finished_product";
 
@@ -387,6 +390,18 @@ function saveBlob(blob: Blob, filename: string): void {
 }
 
 export const api = {
+  async paymentQrSettings(): Promise<PaymentQrSettings> {
+    const { data, error } = await supabase.from("payment_settings").select("gcash_qr_image, maya_qr_image").eq("id", true).single();
+    if (error) throw new Error(["42P01", "42703", "PGRST204", "PGRST205"].includes(error.code) ? "Payment QR settings are not configured. Ask the admin to complete setup." : "Payment QR settings could not be loaded. Check your connection and retry.");
+    const settings: PaymentQrSettings = { GCash: data.gcash_qr_image, Maya: data.maya_qr_image };
+    for (const [method, image] of Object.entries(settings)) if (image !== null && !isPaymentQrImage(image)) throw new Error(`The saved ${method} QR is invalid. Ask an admin to replace it.`);
+    return settings;
+  },
+  async setPaymentQr(method: DigitalPaymentMethod, image: string | null): Promise<void> {
+    if (image !== null && !isPaymentQrImage(image)) throw new Error("Use a valid cropped QR image.");
+    const { error } = await supabase.rpc("set_payment_qr", { p_method: method, p_image: image });
+    if (error) fail(error);
+  },
   async session(): Promise<UserSession> {
     const { data, error } = await supabase.auth.getSession();
     if (error || !data.session?.user) fail(error, "Not signed in.");
@@ -524,7 +539,7 @@ export const api = {
   async downloadReport(format: "pdf" | "csv", from: string, to: string): Promise<void> { const report = await buildReport(from, to); if (format === "pdf") await savePdf(report); else await saveCsv(report); },
   async downloadInventoryReport(format: "pdf" | "csv", from: string, to: string): Promise<void> { const report = await buildInventoryReport(from, to); if (format === "pdf") await saveInventoryPdf(report); else await saveInventoryCsv(report); },
   subscribeWorkspace(onChange: () => void): () => void {
-    const tables = ["products", "inventory_movements", "sales", "sale_items", "sale_ingredient_usage", "notifications", "notification_reads", "cash_shifts", "cash_movements"];
+    const tables = ["products", "inventory_movements", "sales", "sale_items", "sale_ingredient_usage", "notifications", "notification_reads", "cash_shifts", "cash_movements", "payment_settings"];
     let channel = supabase.channel(`workspace-${crypto.randomUUID()}`);
     tables.forEach((table) => { channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange); });
     void channel.subscribe();
