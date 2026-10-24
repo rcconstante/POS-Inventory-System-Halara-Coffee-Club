@@ -21,7 +21,9 @@
 - Live migration 010 permissions were checked: staff read succeeds, staff RPC
   changes and direct updates are denied, anonymous reads are denied, and server
   PNG validation accepts the crop and rejects external URLs/SVG/truncated PNG.
-  Migration 011 adds Maya; verify it is applied before publishing the UI.
+  Migration 011 is now verified live: both QR columns are readable by staff,
+  the shared update RPC denies staff writes, direct updates remain denied,
+  and anonymous reads remain denied. The database is ready for both methods.
 - Signed APK 1.0.3 (version code 4) builds successfully. Its certificate matches
   prior releases, supports ARM64/ARMv7 and Android 7+, and the four native raster
   encoder tests pass. APK SHA-256:
