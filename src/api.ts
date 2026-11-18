@@ -1,5 +1,6 @@
 import { createClient, type User } from "@supabase/supabase-js";
 import { isPaymentQrImage } from "./payment-qr";
+import { stockQuantity } from "./inventory-quantity";
 
 export type UserRole = "admin" | "staff";
 export type PaymentMethod = "Cash" | "GCash" | "Maya";
@@ -496,11 +497,11 @@ export const api = {
     await removeStorageFile("product-images", (data as { image_path: string | null } | null)?.image_path ?? null);
   },
   async createStock(body: { productId: string; quantity: number; date: string; note: string; totalCost: number }): Promise<{ id: string }> {
-    const { data, error } = await supabase.rpc("add_stock", { p_product_id: body.productId, p_quantity: body.quantity, p_date: body.date, p_note: body.note, p_total_cost_centavos: Math.round(body.totalCost * 100) });
+    const { data, error } = await supabase.rpc("add_stock", { p_product_id: body.productId, p_quantity: stockQuantity(String(body.quantity)), p_date: body.date, p_note: body.note, p_total_cost_centavos: Math.round(body.totalCost * 100) });
     if (error) fail(error); return { id: String(data) };
   },
   async updateStock(id: string, body: { quantity: number; date: string; note: string; totalCost: number }): Promise<{ id: string }> {
-    const { error } = await supabase.rpc("update_stock_entry", { p_id: id, p_quantity: body.quantity, p_date: body.date, p_note: body.note, p_total_cost_centavos: Math.round(body.totalCost * 100) });
+    const { error } = await supabase.rpc("update_stock_entry", { p_id: id, p_quantity: stockQuantity(String(body.quantity)), p_date: body.date, p_note: body.note, p_total_cost_centavos: Math.round(body.totalCost * 100) });
     if (error) fail(error); return { id };
   },
   async deleteStock(id: string): Promise<void> { const { error } = await supabase.rpc("delete_stock_entry", { p_id: id }); if (error) fail(error); },
