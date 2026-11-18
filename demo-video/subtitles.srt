@@ -1,0 +1,219 @@
+1
+00:00:00,450 --> 00:00:04,677
+This is the Halara Coffee Club Point of Sale and Inventory System:
+
+2
+00:00:04,677 --> 00:00:09,225
+an Android tablet app for the staff, and a web dashboard for the admin.
+
+3
+00:00:10,825 --> 00:00:13,950
+Part one: the staff app on the Android tablet.
+
+4
+00:00:15,550 --> 00:00:17,902
+Staff sign in with their own account.
+
+5
+00:00:17,902 --> 00:00:20,000
+Here we use the demo credentials.
+
+6
+00:00:21,000 --> 00:00:25,575
+The home screen shows today's sales, transactions, and low-stock alerts.
+
+7
+00:00:26,575 --> 00:00:29,888
+Before taking orders, the cashier must open a shift,
+
+8
+00:00:29,888 --> 00:00:31,800
+so every payment is traceable.
+
+9
+00:00:32,800 --> 00:00:37,925
+The cashier enters the starting cash, one thousand pesos, and opens the shift.
+
+10
+00:00:38,925 --> 00:00:40,813
+Each menu item shows its price,
+
+11
+00:00:40,813 --> 00:00:45,075
+and how many servings can still be made from the ingredients in stock.
+
+12
+00:00:46,075 --> 00:00:49,801
+When an ingredient runs out, like the ham for this sandwich,
+
+13
+00:00:49,801 --> 00:00:51,975
+the item is disabled automatically.
+
+14
+00:00:52,975 --> 00:00:57,250
+Staff filter by category, and tap plus to add items to the order.
+
+15
+00:01:00,025 --> 00:01:02,675
+In the cart, quantities can be adjusted.
+
+16
+00:01:03,675 --> 00:01:06,088
+Cash, G-Cash, and Maya are supported.
+
+17
+00:01:06,088 --> 00:01:10,000
+For cash, quick-amount buttons compute the change instantly.
+
+18
+00:01:11,000 --> 00:01:13,150
+Once confirmed, the sale is saved,
+
+19
+00:01:13,150 --> 00:01:16,121
+recipe ingredients are deducted from inventory,
+
+20
+00:01:16,121 --> 00:01:19,725
+and the receipt prints directly to the Bluetooth printer.
+
+21
+00:01:20,725 --> 00:01:24,133
+For G-Cash or Maya, the store's QR code is shown.
+
+22
+00:01:24,133 --> 00:01:27,750
+The cashier confirms only after the payment arrives.
+
+23
+00:01:35,125 --> 00:01:39,862
+The Orders screen lists every transaction, where receipts can be reprinted,
+
+24
+00:01:39,862 --> 00:01:41,125
+and orders refunded.
+
+25
+00:01:42,125 --> 00:01:47,000
+Staff can also check raw material stock, with low and out-of-stock labels.
+
+26
+00:01:48,000 --> 00:01:52,386
+At the end of the shift, the cashier counts the drawer and closes the shift.
+
+27
+00:01:52,386 --> 00:01:55,675
+The system records any difference from the expected cash.
+
+28
+00:01:56,675 --> 00:01:59,575
+Part two: the admin dashboard on the web.
+
+29
+00:02:01,175 --> 00:02:03,582
+On the web, users choose their role.
+
+30
+00:02:03,582 --> 00:02:06,525
+Only admin accounts can open the admin side.
+
+31
+00:02:07,525 --> 00:02:12,312
+The dashboard summarizes sales, transactions, stock alerts, and products.
+
+32
+00:02:12,312 --> 00:02:16,575
+The tablet orders we just made already appear here, in real time.
+
+33
+00:02:17,575 --> 00:02:22,025
+Low-stock and out-of-stock notifications are created automatically.
+
+34
+00:02:23,025 --> 00:02:27,684
+The Sales page lets the admin search transactions, view receipts,
+
+35
+00:02:27,684 --> 00:02:30,050
+export to CSV, and refund orders.
+
+36
+00:02:31,050 --> 00:02:34,751
+In Products, each menu item has a recipe per serving.
+
+37
+00:02:34,751 --> 00:02:37,475
+This links every sale to the inventory.
+
+38
+00:02:39,800 --> 00:02:43,638
+Raw materials are tracked in grams, milliliters, or pieces,
+
+39
+00:02:43,638 --> 00:02:45,850
+each with its own low-stock level.
+
+40
+00:02:46,850 --> 00:02:51,653
+When a delivery arrives, the admin records the quantity and purchase cost.
+
+41
+00:02:51,653 --> 00:02:53,600
+Here, five liters of oat milk.
+
+42
+00:02:54,800 --> 00:02:57,710
+Stock updates immediately, the alert clears,
+
+43
+00:02:57,710 --> 00:03:00,950
+and a weighted-average cost values the inventory.
+
+44
+00:03:01,950 --> 00:03:06,226
+Cash Management shows every cashier shift, with the expected cash,
+
+45
+00:03:06,226 --> 00:03:07,975
+counted cash, and variance.
+
+46
+00:03:08,975 --> 00:03:13,825
+Reports show daily revenue, top-selling products, and the payment method mix.
+
+47
+00:03:15,025 --> 00:03:20,564
+The inventory report covers stock value, deliveries, ingredient usage,
+
+48
+00:03:20,564 --> 00:03:21,435
+and alerts.
+
+49
+00:03:21,435 --> 00:03:24,125
+Both reports export to PDF or CSV.
+
+50
+00:03:25,125 --> 00:03:29,106
+In Settings, the admin manages their profile and password,
+
+51
+00:03:29,106 --> 00:03:33,225
+and uploads the G-Cash and Maya QR codes used by the tablet.
+
+52
+00:03:34,225 --> 00:03:39,380
+In summary: Cash, G-Cash and Maya payments, automatic recipe-based inventory,
+
+53
+00:03:39,380 --> 00:03:43,330
+low-stock alerts, shift reconciliation, exportable reports,
+
+54
+00:03:43,330 --> 00:03:45,406
+and Bluetooth receipt printing.
+
+55
+00:03:45,406 --> 00:03:46,075
+Thank you!

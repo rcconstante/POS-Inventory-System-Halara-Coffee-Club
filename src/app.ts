@@ -1368,8 +1368,11 @@ function toggleNotifications(button?: HTMLButtonElement): void {
   wrap.querySelector(".notification-popover")?.remove();
   if (!ui.notificationsOpen) return;
   wrap.insertAdjacentHTML("beforeend", renderNotificationPopover());
-  hydrate(wrap);
-  bindNotificationPopover(wrap);
+  // Hydrate only the popover: re-hydrating the wrap would replace the bell's
+  // icon while its click is still dispatching, which the outside-click handler
+  // then reads as a click outside and closes the popover immediately.
+  const popover = wrap.querySelector<HTMLElement>(".notification-popover");
+  if (popover) { hydrate(popover); bindNotificationPopover(popover); }
   window.setTimeout(() => wrap.querySelector<HTMLButtonElement>('[data-action="close-notifications"]')?.focus(), 0);
 }
 
@@ -1390,8 +1393,8 @@ function refreshNotificationPopover(): void {
   const popover = document.querySelector<HTMLElement>(".notification-popover");
   if (!popover) return;
   popover.outerHTML = renderNotificationPopover();
-  const wrap = document.querySelector<HTMLElement>(".notification-wrap");
-  if (wrap) { hydrate(wrap); bindNotificationPopover(wrap); }
+  const next = document.querySelector<HTMLElement>(".notification-popover");
+  if (next) { hydrate(next); bindNotificationPopover(next); }
 }
 
 async function markAllNotifications(): Promise<void> {
@@ -1525,8 +1528,10 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("click", (event) => {
   if (!ui.notificationsOpen) return;
-  const target = event.target;
-  if (target instanceof Node && !document.querySelector(".notification-wrap")?.contains(target)) closeNotifications();
+  // composedPath() is fixed at dispatch time, so it still counts a click whose
+  // target was re-rendered (detached) during the click as inside the wrap.
+  const wrap = document.querySelector(".notification-wrap");
+  if (wrap && !event.composedPath().includes(wrap)) closeNotifications();
 });
 
 function openStockDialog(id?: string): void {

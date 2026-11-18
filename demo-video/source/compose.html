@@ -1,0 +1,248 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>compose</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #1a0f0a; font-family: "Segoe UI", "Segoe UI Variable", Arial, sans-serif; }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(1200px 700px at 30% 20%, #4a2a18 0%, #23140c 55%, #140b07 100%); }
+  #world { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .device { position: absolute; display: none; }
+  #web { left: 153px; top: 70px; width: 1613px; height: 945px; border-radius: 14px; background: #f3f1ef; box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); overflow: hidden; }
+  #web .chrome { height: 38px; background: #e7e3df; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid #d6d0ca; }
+  #web .chrome i { width: 13px; height: 13px; border-radius: 50%; display: inline-block; }
+  #web .url { margin-left: 22px; flex: 0 0 640px; height: 24px; border-radius: 12px; background: #fff; font-size: 14px; color: #5b4b40; display: flex; align-items: center; padding-left: 14px; gap: 6px; }
+  #web .screen { position: absolute; left: 0; top: 38px; width: 1613px; height: 907px; }
+  #tablet { left: 258px; top: 80px; width: 1404px; height: 900px; border-radius: 44px; background: linear-gradient(145deg, #2b2b2e, #0d0d0f); box-shadow: 0 40px 90px rgba(0,0,0,.6), inset 0 0 0 2px #3a3a3e; }
+  #tablet .screen { position: absolute; left: 30px; top: 30px; width: 1344px; height: 840px; border-radius: 10px; overflow: hidden; background: #fff; }
+  #tablet .cam { position: absolute; left: 50%; top: 13px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: #1d2a3a; box-shadow: 0 0 0 2px #222; }
+  .screen img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #ring { position: absolute; border: 4px solid #f5a524; border-radius: 16px; box-shadow: 0 0 0 4000px rgba(10,6,4,0), 0 0 28px rgba(245,165,36,.75); opacity: 0; }
+  #label { position: absolute; padding: 10px 22px; border-radius: 999px; background: #f5a524; color: #2a1608; font-weight: 800; font-size: 30px; white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,.35); opacity: 0; }
+  #cursor { position: absolute; width: 44px; height: 52px; opacity: 0; filter: drop-shadow(0 4px 6px rgba(0,0,0,.45)); }
+  #ripple { position: absolute; border-radius: 50%; border: 5px solid #f5a524; opacity: 0; }
+  #tap { position: absolute; border-radius: 50%; background: rgba(255,255,255,.55); border: 3px solid rgba(255,255,255,.95); box-shadow: 0 0 18px rgba(0,0,0,.35); opacity: 0; }
+  #hud { position: absolute; left: 0; right: 0; top: 0; height: 62px; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; }
+  .chip { display: flex; align-items: center; gap: 10px; padding: 8px 18px; border-radius: 999px; background: rgba(20,11,6,.82); color: #fbe9d4; font-size: 22px; font-weight: 700; letter-spacing: .3px; border: 1px solid rgba(245,165,36,.35); }
+  .chip b { color: #f5a524; }
+  #subs { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); max-width: 1560px; padding: 14px 30px; border-radius: 16px; background: rgba(12,7,4,.84); color: #fff; font-size: 40px; font-weight: 600; line-height: 1.28; text-align: center; opacity: 0; text-shadow: 0 2px 4px rgba(0,0,0,.5); }
+  #progress { position: absolute; left: 0; bottom: 0; height: 7px; background: #f5a524; }
+  #card { position: absolute; inset: 0; opacity: 0; background: radial-gradient(1300px 800px at 50% 35%, #5a3420 0%, #2a170d 55%, #120a06 100%); color: #fbe9d4; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  #card .logo { width: 230px; height: 230px; border-radius: 50%; background: #fff7ee; display: flex; align-items: center; justify-content: center; box-shadow: 0 20px 60px rgba(0,0,0,.45); margin-bottom: 34px; }
+  #card .logo img { width: 190px; }
+  #card .kicker { color: #f5a524; font-size: 28px; letter-spacing: 8px; font-weight: 800; text-transform: uppercase; }
+  #card h1 { font-size: 92px; font-weight: 800; margin: 12px 0 10px; color: #fff; letter-spacing: -1px; }
+  #card h2 { font-size: 44px; font-weight: 600; color: #f3d9bd; }
+  #card .pills { display: flex; gap: 22px; margin-top: 46px; }
+  #card .pill { padding: 14px 28px; border-radius: 999px; border: 2px solid rgba(245,165,36,.6); font-size: 28px; font-weight: 700; background: rgba(0,0,0,.2); }
+  #card .grid { display: grid; grid-template-columns: repeat(2, 720px); gap: 20px 28px; margin-top: 40px; }
+  #card .feat { display: flex; align-items: center; gap: 18px; text-align: left; padding: 18px 26px; border-radius: 18px; background: rgba(255,255,255,.07); border: 1px solid rgba(245,165,36,.35); font-size: 30px; font-weight: 600; }
+  #card .feat span { flex: 0 0 52px; height: 52px; border-radius: 14px; background: #f5a524; color: #2a1608; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; }
+  .anim { will-change: opacity, transform; }
+</style></head>
+<body>
+<div id="stage">
+  <div id="world">
+    <div id="web" class="device"><div class="chrome"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><div class="url">🔒 halara-coffee-club.netlify.app/#/admin</div></div><div class="screen"><img class="a"><img class="b"></div></div>
+    <div id="tablet" class="device"><div class="cam"></div><div class="screen"><img class="a"><img class="b"></div></div>
+  </div>
+  <div id="overlay">
+    <div id="ring"></div><div id="label"></div><div id="ripple"></div><div id="tap"></div>
+    <svg id="cursor" viewBox="0 0 22 26"><path d="M2 1 L2 21 L7 16.5 L10.5 24.5 L14 23 L10.6 15.2 L17.5 15.2 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  </div>
+  <div id="hud"><div class="chip" id="devchip"></div><div class="chip" id="secchip"></div></div>
+  <div id="card"></div>
+  <div id="subs"></div>
+  <div id="progress"></div>
+</div>
+<script>
+const W = 1920, H = 1080;
+const DEV = { web: { x: 153, y: 108, s: 1613 / 1920 }, tablet: { x: 288, y: 110, s: 1344 / 1920 } };
+const ID = { z: 1, cx: W / 2, cy: H / 2 };
+const MIN = { click: 1.35, stay: 1.1, type: 1.2, focus: 2.2, show: 1.0 };
+const TC = 0.6; // click moment within a click event
+const ease = (k) => k <= 0 ? 0 : k >= 1 ? 1 : k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const mix = (a, b, k) => a + (b - a) * k;
+const camMix = (a, b, k) => ({ z: Math.exp(mix(Math.log(a.z), Math.log(b.z), k)), cx: mix(a.cx, b.cx, k), cy: mix(a.cy, b.cy, k) });
+function toStage(dev, r) { const d = DEV[dev]; return { x: d.x + r[0] * d.s, y: d.y + r[1] * d.s, w: r[2] * d.s, h: r[3] * d.s }; }
+function fit(sr, fill, zmax) {
+  let z = clamp(Math.min(W * fill / sr.w, H * fill / sr.h), 1, zmax);
+  const hw = W / (2 * z), hh = H / (2 * z);
+  return { z, cx: clamp(sr.x + sr.w / 2, hw, W - hw), cy: clamp(sr.y + sr.h / 2, hh, H - hh) };
+}
+const project = (c, x, y) => ({ x: (x - c.cx) * c.z + W / 2, y: (y - c.cy) * c.z + H / 2 });
+
+let SEG = [], TOTAL = 0;
+window.build = (timeline, audio) => {
+  let t = 0, lastImg = null, lastCur = { x: W / 2, y: H / 2 };
+  const LEAD = 0.45, TAIL = 0.55;
+  SEG = timeline.map((s, i) => {
+    const a = audio[i].duration;
+    const seg = { i, s, start: t, audioStart: 0, audioDur: a };
+    if (s.card) {
+      seg.dur = a + LEAD + TAIL + (s.card.kind === "outro" ? 2.2 : 0.6);
+    } else {
+      const evs = s.events.map((e) => ({ ...e, sr: e.rect ? toStage(s.device, e.rect) : null, min: e.type === "click" ? (e.stay ? MIN.stay : MIN.click) : MIN[e.type] }));
+      const sum = evs.reduce((x, e) => x + e.min, 0);
+      seg.dur = Math.max(sum + 0.3, a + LEAD + TAIL);
+      const extra = seg.dur - sum - 0.3;
+      const weight = (e) => e.type === "focus" ? 3 : e.type === "show" ? 2 : e.type === "click" && !e.stay ? 1 : 0.4;
+      const wsum = evs.reduce((x, e) => x + weight(e), 0);
+      let u = 0, cam = ID;
+      for (const e of evs) {
+        e.start = u; e.dur = e.min + extra * weight(e) / wsum; u += e.dur;
+        e.camFrom = cam;
+        e.cam = e.type === "show" ? ID : e.type === "focus" ? fit(e.sr, 0.72, 2.1) : fit(e.sr, 0.3, 1.85);
+        if (e.type === "focus" && e.label && e.cam.z > 1.6) e.cam = fit(e.sr, 0.6, 2.1);
+        cam = (e.stay ? e.cam : ID);
+        e.prevImg = lastImg; lastImg = e.after;
+        e.curFrom = lastCur;
+        e.curTo = e.sr ? (e.type === "focus" ? { x: e.sr.x + e.sr.w - 6, y: e.sr.y + e.sr.h - 6 } : { x: e.sr.x + e.sr.w / 2, y: e.sr.y + e.sr.h / 2 }) : lastCur;
+        lastCur = e.curTo;
+      }
+      seg.events = evs;
+    }
+    seg.audioStart = t + LEAD;
+    // subtitle chunks
+    const parts = s.say.match(/[^.,;:!?]+[.,;:!?]*/g).map((p) => p.trim()).filter(Boolean);
+    const chunks = [];
+    for (const p of parts) { const prev = chunks.at(-1); if (prev && (prev + " " + p).length <= 78 && !/[.!?]$/.test(prev)) chunks[chunks.length - 1] = prev + " " + p; else chunks.push(p); }
+    const total = chunks.reduce((x, c) => x + c.length, 0);
+    let st = seg.audioStart;
+    seg.subs = chunks.map((c) => { const d = a * c.length / total; const r = { text: c, start: st, end: st + d }; st += d; return r; });
+    t += seg.dur;
+    return seg;
+  });
+  TOTAL = t;
+  return { starts: SEG.map((s) => +s.start.toFixed(2)), total: TOTAL, audio: SEG.map((s) => ({ start: s.audioStart })), subs: SEG.flatMap((s) => s.subs) };
+};
+
+// --------------------------------------------------------------- scene state
+function stepState(seg, u) {
+  const s = seg.s; const evs = seg.events;
+  let e = evs[evs.length - 1];
+  for (const x of evs) if (u < x.start + x.dur) { e = x; break; }
+  const k = u - e.start, D = e.dur;
+  const st = { device: s.device, section: s.section, imgA: e.before, imgB: null, mixB: 0, cam: ID, ring: null, ringA: 0, dim: 0, label: null, cursor: null, curA: 1, ripple: null, tap: null };
+  // image
+  if (k < 0.22 && e.prevImg && e.prevImg !== e.before) { st.imgA = e.prevImg; st.imgB = e.before; st.mixB = ease(k / 0.22); }
+  else if ((e.type === "click" || e.type === "type") && k >= TC + 0.08) { st.imgA = e.before; st.imgB = e.after; st.mixB = ease((k - TC - 0.08) / 0.32); }
+  // camera
+  const zin = ease(k / 0.55);
+  let cam = camMix(e.camFrom, e.cam, zin);
+  const leaving = !e.stay && e.type !== "show";
+  if (leaving && k > D - 0.5) cam = camMix(e.cam, ID, ease((k - (D - 0.5)) / 0.5));
+  st.cam = cam;
+  // cursor
+  const cp = ease(clamp((k - 0.05) / 0.5, 0, 1));
+  st.cursor = { x: mix(e.curFrom.x, e.curTo.x, cp), y: mix(e.curFrom.y, e.curTo.y, cp) };
+  st.press = (e.type === "click") && k > TC - 0.06 && k < TC + 0.12;
+  // ring
+  if (e.sr) {
+    if (e.type === "focus") {
+      const inA = ease((k - 0.3) / 0.4), outA = 1 - ease((k - (D - 0.55)) / 0.35);
+      st.ringA = Math.min(inA, outA); st.dim = 0.5 * st.ringA; st.ring = e.sr; st.label = e.label;
+    } else {
+      const inA = ease((k - 0.25) / 0.25), outA = 1 - ease((k - (TC + 0.35)) / 0.3);
+      st.ringA = Math.min(inA, outA) * (e.type === "type" ? 0.9 : 1); st.ring = e.sr; st.label = e.label; st.dim = 0;
+      if (e.type === "click" && k >= TC) st.ripple = { x: e.curTo.x, y: e.curTo.y, p: clamp((k - TC) / 0.55, 0, 1) };
+    }
+  }
+  return st;
+}
+
+const $ = (id) => document.getElementById(id);
+const imgEls = { web: [document.querySelector("#web .a"), document.querySelector("#web .b")], tablet: [document.querySelector("#tablet .a"), document.querySelector("#tablet .b")] };
+async function setImg(el, name) {
+  const src = name ? `shots/${name}` : "";
+  if (el.dataset.src === src) return;
+  el.dataset.src = src;
+  if (!src) { el.removeAttribute("src"); return; }
+  el.src = src; await el.decode().catch(() => {});
+}
+
+async function applyStep(st) {
+  $("web").style.display = st.device === "web" ? "block" : "none";
+  $("tablet").style.display = st.device === "tablet" ? "block" : "none";
+  const [a, b] = imgEls[st.device];
+  await Promise.all([setImg(a, st.imgA), setImg(b, st.imgB)]);
+  b.style.opacity = st.imgB ? st.mixB : 0;
+  const c = st.cam;
+  $("world").style.transform = `translate(${W / 2}px, ${H / 2}px) scale(${c.z}) translate(${-c.cx}px, ${-c.cy}px)`;
+  $("devchip").innerHTML = st.device === "web" ? "<b>WEB</b> · Admin Dashboard" : "<b>ANDROID TABLET</b> · Staff POS App";
+  $("secchip").textContent = st.section;
+  $("hud").style.opacity = 1;
+  // ring
+  const ring = $("ring"), label = $("label");
+  if (st.ring && st.ringA > 0.001) {
+    const p0 = project(c, st.ring.x, st.ring.y), p1 = project(c, st.ring.x + st.ring.w, st.ring.y + st.ring.h);
+    const pad = 10;
+    Object.assign(ring.style, { left: `${p0.x - pad}px`, top: `${p0.y - pad}px`, width: `${p1.x - p0.x + pad * 2}px`, height: `${p1.y - p0.y + pad * 2}px`, opacity: st.ringA, boxShadow: `0 0 0 4000px rgba(10,6,4,${st.dim}), 0 0 28px rgba(245,165,36,.75)` });
+    if (st.label) {
+      label.textContent = st.label; label.style.opacity = st.ringA;
+      const lw = label.offsetWidth, lh = label.offsetHeight;
+      let lx = clamp((p0.x + p1.x) / 2 - lw / 2, 20, W - lw - 20), ly = p0.y - pad - lh - 16;
+      if (ly < 70) ly = Math.min(p1.y + pad + 16, H - lh - 150);
+      label.style.left = `${lx}px`; label.style.top = `${ly}px`;
+    } else label.style.opacity = 0;
+  } else { ring.style.opacity = 0; label.style.opacity = 0; }
+  // cursor / tap
+  const cur = $("cursor"), rip = $("ripple"), tap = $("tap");
+  const cp = project(c, st.cursor.x, st.cursor.y);
+  if (st.device === "web") {
+    cur.style.opacity = 1; cur.style.left = `${cp.x - 4}px`; cur.style.top = `${cp.y - 2}px`;
+    cur.style.transform = st.press ? "scale(.82)" : "scale(1)"; tap.style.opacity = 0;
+  } else {
+    cur.style.opacity = 0;
+    if (st.ripple) { const p = st.ripple.p; const s = 46 * (1 - p * 0.3); tap.style.opacity = (1 - p) * 0.95; Object.assign(tap.style, { left: `${cp.x - s / 2}px`, top: `${cp.y - s / 2}px`, width: `${s}px`, height: `${s}px` }); }
+    else tap.style.opacity = 0;
+  }
+  if (st.ripple) {
+    const p = st.ripple.p, r = 18 + 70 * ease(p);
+    Object.assign(rip.style, { left: `${cp.x - r}px`, top: `${cp.y - r}px`, width: `${2 * r}px`, height: `${2 * r}px`, opacity: (1 - p) * 0.9 });
+  } else rip.style.opacity = 0;
+}
+
+function cardHtml(card) {
+  const logo = `<div class="logo anim" data-in="0.1"><img src="logo.webp"></div>`;
+  if (card.kind === "title") return `${logo}<div class="kicker anim" data-in="0.4">System Demonstration</div><h1 class="anim" data-in="0.6">Halara Coffee Club</h1><h2 class="anim" data-in="0.9">Point of Sale &amp; Inventory Management System</h2><div class="pills"><div class="pill anim" data-in="4.4">Android Tablet · Staff POS</div><div class="pill anim" data-in="6.0">Web · Admin Dashboard</div></div>`;
+  if (card.kind === "section") return `${logo}<div class="kicker anim" data-in="0.2">${card.title}</div><h1 class="anim" data-in="0.45">${card.subtitle}</h1>`;
+  const feats = [["₱", "POS with Cash, GCash &amp; Maya"], ["⚙", "Recipe-based automatic stock deduction"], ["!", "Automatic low-stock alerts"], ["▣", "Cashier shifts &amp; cash reconciliation"], ["▤", "Sales &amp; inventory reports · PDF / CSV"], ["⎙", "Direct Bluetooth receipt printing"], ["⇄", "Real-time sync · tablet ↔ web"], ["🔒", "Role-based secure access"]];
+  return `<div class="kicker anim" data-in="0.2">Summary</div><h1 class="anim" data-in="0.4">Key Features</h1><div class="grid">${feats.map(([i, f], n) => `<div class="feat anim" data-in="${1.6 + n * 1.25}"><span>${i}</span>${f}</div>`).join("")}</div><h2 class="anim" data-in="${1.6 + 8 * 1.25 + 0.4}" style="margin-top:40px">Thank you!</h2>`;
+}
+let cardKey = null;
+function applyCard(seg, u, opacity) {
+  const el = $("card");
+  if (cardKey !== seg.i) { el.innerHTML = cardHtml(seg.s.card); cardKey = seg.i; }
+  el.style.opacity = opacity;
+  el.querySelectorAll(".anim").forEach((n) => { const k = ease((u - Number(n.dataset.in)) / 0.6); n.style.opacity = k; n.style.transform = `translateY(${(1 - k) * 28}px)`; });
+}
+
+function edgeState(seg, atEnd) {
+  if (!seg || seg.s.card) return null;
+  return stepState(seg, atEnd ? seg.dur - 0.001 : 0);
+}
+
+window.renderAt = async (t) => {
+  let seg = SEG[SEG.length - 1];
+  for (const s of SEG) if (t < s.start + s.dur) { seg = s; break; }
+  const u = t - seg.start;
+  if (seg.s.card) {
+    const FADE = 0.5;
+    let op = 1, under = null;
+    if (u < FADE) { op = ease(u / FADE); under = edgeState(SEG[seg.i - 1], true); }
+    else if (u > seg.dur - FADE && seg.i < SEG.length - 1) { op = 1 - ease((u - (seg.dur - FADE)) / FADE); under = edgeState(SEG[seg.i + 1], false); }
+    if (under) await applyStep(under); else { $("web").style.display = "none"; $("tablet").style.display = "none"; ["ring", "label", "cursor", "ripple", "tap"].forEach((id) => $(id).style.opacity = 0); }
+    $("hud").style.opacity = under ? 1 - op : 0;
+    applyCard(seg, u, op);
+  } else {
+    $("card").style.opacity = 0;
+    await applyStep(stepState(seg, u));
+  }
+  const sub = seg.subs.find((x) => t >= x.start && t < x.end + 0.15);
+  const subs = $("subs");
+  if (sub) { subs.textContent = sub.text; subs.style.opacity = 1; } else subs.style.opacity = 0;
+  $("progress").style.width = `${(t / TOTAL) * 100}%`;
+};
+</script>
+</body></html>

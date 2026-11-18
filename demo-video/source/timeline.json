@@ -1,0 +1,1208 @@
+[
+  {
+    "card": {
+      "kind": "title",
+      "section": "Introduction",
+      "say": "This is the Halara Coffee Club Point of Sale and Inventory System. It has two parts: an Android tablet app for the staff, and a web dashboard for the admin. Let's walk through every feature."
+    },
+    "say": "This is the Halara Coffee Club Point of Sale and Inventory System: an Android tablet app for the staff, and a web dashboard for the admin.",
+    "section": "Introduction"
+  },
+  {
+    "card": {
+      "kind": "section",
+      "section": "Part 1 · Staff Tablet App",
+      "title": "Part 1",
+      "subtitle": "Staff POS on the Android tablet",
+      "say": "Part one. The staff point of sale, running on the Android tablet."
+    },
+    "say": "Part one: the staff app on the Android tablet.",
+    "section": "Part 1 · Staff Tablet App"
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Sign in",
+    "say": "Staff sign in with their own account. Here we use the demo credentials.",
+    "events": [
+      {
+        "type": "click",
+        "before": "000.jpg",
+        "after": "001.jpg",
+        "rect": [
+          178.5,
+          935.25,
+          603,
+          76.5
+        ],
+        "stay": true
+      },
+      {
+        "type": "click",
+        "before": "002.jpg",
+        "after": "003.jpg",
+        "rect": [
+          157.5,
+          782.25,
+          645,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Home",
+    "say": "The home screen shows today's sales, transactions, and low-stock alerts.",
+    "events": [
+      {
+        "type": "focus",
+        "before": "004.jpg",
+        "after": "004.jpg",
+        "rect": [
+          210,
+          234,
+          1500,
+          207
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Cash shift",
+    "say": "Before taking orders, the cashier must open a shift, so every payment is traceable.",
+    "events": [
+      {
+        "type": "click",
+        "before": "005.jpg",
+        "after": "006.jpg",
+        "rect": [
+          645,
+          1111.5,
+          315,
+          79.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "007.jpg",
+        "after": "007.jpg",
+        "rect": [
+          540,
+          267,
+          840,
+          356.765625
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Cash shift",
+    "say": "The cashier enters the starting cash, one thousand pesos, and opens the shift.",
+    "events": [
+      {
+        "type": "click",
+        "before": "008.jpg",
+        "after": "009.jpg",
+        "rect": [
+          886.9921875,
+          505.265625,
+          146.015625,
+          63
+        ]
+      },
+      {
+        "type": "click",
+        "before": "010.jpg",
+        "after": "011.jpg",
+        "rect": [
+          888.4453125,
+          503.765625,
+          143.0859375,
+          63
+        ]
+      },
+      {
+        "type": "type",
+        "before": "012.jpg",
+        "after": "013.jpg",
+        "rect": [
+          616.5,
+          608.34375,
+          687,
+          66
+        ],
+        "stay": true
+      },
+      {
+        "type": "click",
+        "before": "014.jpg",
+        "after": "015.jpg",
+        "rect": [
+          1160.4140625,
+          722.34375,
+          143.0859375,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Menu",
+    "say": "Each menu item shows its price, and how many servings can still be made from the ingredients in stock.",
+    "events": [
+      {
+        "type": "click",
+        "before": "016.jpg",
+        "after": "017.jpg",
+        "rect": [
+          645,
+          1111.5,
+          315,
+          79.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "018.jpg",
+        "after": "018.jpg",
+        "rect": [
+          1366.875,
+          748.4296875,
+          275.625,
+          31.5703125
+        ],
+        "label": "Servings left"
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Menu",
+    "say": "When an ingredient runs out, like the ham for this sandwich, the item is disabled automatically.",
+    "events": [
+      {
+        "type": "focus",
+        "before": "019.jpg",
+        "after": "019.jpg",
+        "rect": [
+          210,
+          402,
+          362.625,
+          396
+        ],
+        "label": "Sold out"
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Taking an order",
+    "say": "Staff filter by category, and tap plus to add items to the order.",
+    "events": [
+      {
+        "type": "click",
+        "before": "020.jpg",
+        "after": "021.jpg",
+        "rect": [
+          387.4921875,
+          327,
+          144.2578125,
+          51
+        ]
+      },
+      {
+        "type": "click",
+        "before": "022.jpg",
+        "after": "023.jpg",
+        "rect": [
+          890.25,
+          736.5,
+          45,
+          45
+        ]
+      },
+      {
+        "type": "click",
+        "before": "024.jpg",
+        "after": "025.jpg",
+        "rect": [
+          1269.375,
+          736.5,
+          45,
+          45
+        ]
+      },
+      {
+        "type": "click",
+        "before": "026.jpg",
+        "after": "027.jpg",
+        "rect": [
+          754.8046875,
+          327,
+          92.9296875,
+          51
+        ]
+      },
+      {
+        "type": "click",
+        "before": "028.jpg",
+        "after": "029.jpg",
+        "rect": [
+          890.25,
+          736.5,
+          45,
+          45
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Cart",
+    "say": "In the cart, quantities can be adjusted.",
+    "events": [
+      {
+        "type": "click",
+        "before": "030.jpg",
+        "after": "031.jpg",
+        "rect": [
+          1641,
+          133.5,
+          69,
+          69
+        ]
+      },
+      {
+        "type": "click",
+        "before": "032.jpg",
+        "after": "033.jpg",
+        "rect": [
+          1242,
+          267,
+          42,
+          42
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Payment",
+    "say": "Cash, G-Cash, and Maya are supported. For cash, quick-amount buttons compute the change instantly.",
+    "events": [
+      {
+        "type": "click",
+        "before": "034.jpg",
+        "after": "035.jpg",
+        "rect": [
+          480,
+          780,
+          960,
+          63
+        ]
+      },
+      {
+        "type": "click",
+        "before": "036.jpg",
+        "after": "037.jpg",
+        "rect": [
+          514.5,
+          388.5,
+          286.9921875,
+          192
+        ]
+      },
+      {
+        "type": "click",
+        "before": "038.jpg",
+        "after": "039.jpg",
+        "rect": [
+          627.796875,
+          750,
+          112.03125,
+          49.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "040.jpg",
+        "after": "040.jpg",
+        "rect": [
+          514.5,
+          606,
+          891,
+          219
+        ],
+        "label": "Change"
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Receipt",
+    "say": "Once confirmed, the sale is saved, recipe ingredients are deducted from inventory, and the receipt prints directly to the Bluetooth printer.",
+    "events": [
+      {
+        "type": "click",
+        "before": "041.jpg",
+        "after": "042.jpg",
+        "rect": [
+          967.5,
+          862.5,
+          438,
+          63
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "043.jpg",
+        "after": "043.jpg",
+        "rect": [
+          700,
+          135,
+          520,
+          300
+        ],
+        "label": "Sale saved"
+      },
+      {
+        "type": "focus",
+        "before": "043.jpg",
+        "after": "043.jpg",
+        "rect": [
+          1348,
+          1000,
+          550,
+          178
+        ],
+        "label": "Printing to Bluetooth"
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · G-Cash / Maya",
+    "say": "For G-Cash or Maya, the store's QR code is shown. The cashier confirms only after the payment arrives.",
+    "events": [
+      {
+        "type": "click",
+        "before": "044.jpg",
+        "after": "045.jpg",
+        "rect": [
+          967.5,
+          897.28125,
+          472.5,
+          63
+        ]
+      },
+      {
+        "type": "click",
+        "before": "046.jpg",
+        "after": "047.jpg",
+        "rect": [
+          542.25,
+          327,
+          115.4296875,
+          51
+        ]
+      },
+      {
+        "type": "click",
+        "before": "048.jpg",
+        "after": "049.jpg",
+        "rect": [
+          890.25,
+          736.5,
+          45,
+          45
+        ]
+      },
+      {
+        "type": "click",
+        "before": "050.jpg",
+        "after": "051.jpg",
+        "rect": [
+          1641,
+          133.5,
+          69,
+          69
+        ]
+      },
+      {
+        "type": "click",
+        "before": "052.jpg",
+        "after": "053.jpg",
+        "rect": [
+          480,
+          537,
+          960,
+          63
+        ]
+      },
+      {
+        "type": "click",
+        "before": "054.jpg",
+        "after": "055.jpg",
+        "rect": [
+          816.4921875,
+          388.5,
+          286.9921875,
+          192
+        ]
+      },
+      {
+        "type": "click",
+        "before": "056.jpg",
+        "after": "057.jpg",
+        "rect": [
+          967.5,
+          648.703125,
+          438,
+          63
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "058.jpg",
+        "after": "058.jpg",
+        "rect": [
+          616.5,
+          249.140625,
+          687,
+          751.40625
+        ],
+        "label": "Store QR"
+      },
+      {
+        "type": "click",
+        "before": "059.jpg",
+        "after": "060.jpg",
+        "rect": [
+          616.5,
+          921.046875,
+          687,
+          79.5
+        ],
+        "stay": true
+      },
+      {
+        "type": "click",
+        "before": "061.jpg",
+        "after": "062.jpg",
+        "rect": [
+          1098.2578125,
+          1048.546875,
+          205.2421875,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Orders",
+    "say": "The Orders screen lists every transaction, where receipts can be reprinted, and orders refunded.",
+    "events": [
+      {
+        "type": "click",
+        "before": "063.jpg",
+        "after": "064.jpg",
+        "rect": [
+          330,
+          1111.5,
+          315,
+          79.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "065.jpg",
+        "after": "065.jpg",
+        "rect": [
+          1479.0703125,
+          257.25,
+          209.9296875,
+          40.5
+        ],
+        "label": "Reprint · Refund"
+      },
+      {
+        "type": "click",
+        "before": "066.jpg",
+        "after": "067.jpg",
+        "rect": [
+          1479.0703125,
+          357.75,
+          101.90625,
+          40.5
+        ]
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Inventory",
+    "say": "Staff can also check raw material stock, with low and out-of-stock labels.",
+    "events": [
+      {
+        "type": "click",
+        "before": "068.jpg",
+        "after": "069.jpg",
+        "rect": [
+          1252.5,
+          60,
+          51,
+          51
+        ]
+      },
+      {
+        "type": "click",
+        "before": "070.jpg",
+        "after": "071.jpg",
+        "rect": [
+          1275,
+          1111.5,
+          315,
+          79.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "072.jpg",
+        "after": "072.jpg",
+        "rect": [
+          210,
+          550.5,
+          1500,
+          99
+        ],
+        "label": "Low stock"
+      }
+    ]
+  },
+  {
+    "device": "tablet",
+    "section": "Tablet · Close shift",
+    "say": "At the end of the shift, the cashier counts the drawer and closes the shift. The system records any difference from the expected cash.",
+    "events": [
+      {
+        "type": "click",
+        "before": "073.jpg",
+        "after": "074.jpg",
+        "rect": [
+          960,
+          1111.5,
+          315,
+          79.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "075.jpg",
+        "after": "075.jpg",
+        "rect": [
+          210,
+          97.5,
+          1500,
+          207
+        ],
+        "label": "Expected cash"
+      },
+      {
+        "type": "click",
+        "before": "076.jpg",
+        "after": "077.jpg",
+        "rect": [
+          1538.8828125,
+          561,
+          142.6171875,
+          63
+        ]
+      },
+      {
+        "type": "type",
+        "before": "078.jpg",
+        "after": "079.jpg",
+        "rect": [
+          616.5,
+          554.671875,
+          687,
+          66
+        ],
+        "stay": true
+      },
+      {
+        "type": "click",
+        "before": "080.jpg",
+        "after": "081.jpg",
+        "rect": [
+          1160.8828125,
+          858.515625,
+          142.6171875,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "card": {
+      "kind": "section",
+      "section": "Part 2 · Admin Web Dashboard",
+      "title": "Part 2",
+      "subtitle": "Admin dashboard on the web",
+      "say": "Part two. The admin web dashboard, where the business is managed."
+    },
+    "say": "Part two: the admin dashboard on the web.",
+    "section": "Part 2 · Admin Web Dashboard"
+  },
+  {
+    "device": "web",
+    "section": "Web · Sign in",
+    "say": "On the web, users choose their role. Only admin accounts can open the admin side.",
+    "events": [
+      {
+        "type": "focus",
+        "before": "082.jpg",
+        "after": "082.jpg",
+        "rect": [
+          487.5,
+          475.453125,
+          945,
+          318.28125
+        ]
+      },
+      {
+        "type": "click",
+        "before": "083.jpg",
+        "after": "084.jpg",
+        "rect": [
+          487.5,
+          475.453125,
+          460.5,
+          318.28125
+        ]
+      },
+      {
+        "type": "click",
+        "before": "085.jpg",
+        "after": "086.jpg",
+        "rect": [
+          178.5,
+          902.25,
+          603,
+          76.5
+        ],
+        "stay": true
+      },
+      {
+        "type": "click",
+        "before": "087.jpg",
+        "after": "088.jpg",
+        "rect": [
+          157.5,
+          749.25,
+          645,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Dashboard",
+    "say": "The dashboard summarizes sales, transactions, stock alerts, and products. The tablet orders we just made already appear here, in real time.",
+    "events": [
+      {
+        "type": "focus",
+        "before": "089.jpg",
+        "after": "089.jpg",
+        "rect": [
+          429.5859375,
+          295.6875,
+          1432.828125,
+          207
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "090.jpg",
+        "after": "090.jpg",
+        "rect": [
+          429.5859375,
+          523.6875,
+          961.828125,
+          547.078125
+        ],
+        "label": "Tablet orders"
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Notifications",
+    "say": "Low-stock and out-of-stock notifications are created automatically.",
+    "events": [
+      {
+        "type": "click",
+        "before": "091.jpg",
+        "after": "092.jpg",
+        "rect": [
+          1537.5,
+          23.25,
+          60,
+          60
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "093.jpg",
+        "after": "093.jpg",
+        "rect": [
+          1012.5,
+          99.75,
+          585,
+          686.34375
+        ]
+      },
+      {
+        "type": "click",
+        "before": "094.jpg",
+        "after": "095.jpg",
+        "rect": [
+          1522.5,
+          126.75,
+          46.5,
+          46.5
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Sales",
+    "say": "The Sales page lets the admin search transactions, view receipts, export to CSV, and refund orders.",
+    "events": [
+      {
+        "type": "click",
+        "before": "096.jpg",
+        "after": "097.jpg",
+        "rect": [
+          18,
+          277.5,
+          334.5,
+          66
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "098.jpg",
+        "after": "098.jpg",
+        "rect": [
+          429.5859375,
+          202.6875,
+          1432.828125,
+          199.5
+        ],
+        "label": "Search & export"
+      },
+      {
+        "type": "click",
+        "before": "099.jpg",
+        "after": "100.jpg",
+        "rect": [
+          1530.2578125,
+          496.828125,
+          79.6875,
+          45
+        ]
+      },
+      {
+        "type": "click",
+        "before": "101.jpg",
+        "after": "102.jpg",
+        "rect": [
+          1252.5,
+          60,
+          51,
+          51
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Products & recipes",
+    "say": "In Products, each menu item has a recipe per serving. This links every sale to the inventory.",
+    "events": [
+      {
+        "type": "click",
+        "before": "103.jpg",
+        "after": "104.jpg",
+        "rect": [
+          18,
+          351,
+          334.5,
+          66
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "105.jpg",
+        "after": "105.jpg",
+        "rect": [
+          431.0859375,
+          850.078125,
+          1429.828125,
+          97.5
+        ],
+        "label": "Recipe per serving"
+      },
+      {
+        "type": "click",
+        "before": "106.jpg",
+        "after": "107.jpg",
+        "rect": [
+          1677.9375,
+          871.828125,
+          54.609375,
+          54
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "108.jpg",
+        "after": "108.jpg",
+        "rect": [
+          733.5,
+          514.3359375,
+          765,
+          534
+        ],
+        "label": "Ingredients per cup"
+      },
+      {
+        "type": "click",
+        "before": "109.jpg",
+        "after": "110.jpg",
+        "rect": [
+          1447.5,
+          60,
+          51,
+          51
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Raw materials",
+    "say": "Raw materials are tracked in grams, milliliters, or pieces, each with its own low-stock level.",
+    "events": [
+      {
+        "type": "click",
+        "before": "111.jpg",
+        "after": "112.jpg",
+        "rect": [
+          910.6875,
+          301.6875,
+          470.625,
+          55.5
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "113.jpg",
+        "after": "113.jpg",
+        "rect": [
+          431.0859375,
+          0.1875,
+          1429.828125,
+          1079.8125
+        ],
+        "label": "Stock status"
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Inventory",
+    "say": "When a delivery arrives, the admin records the quantity and purchase cost. Here, five liters of oat milk.",
+    "events": [
+      {
+        "type": "click",
+        "before": "114.jpg",
+        "after": "115.jpg",
+        "rect": [
+          18,
+          424.5,
+          334.5,
+          66
+        ]
+      },
+      {
+        "type": "click",
+        "before": "116.jpg",
+        "after": "117.jpg",
+        "rect": [
+          1686.046875,
+          202.6875,
+          176.3671875,
+          63
+        ]
+      },
+      {
+        "type": "type",
+        "before": "118.jpg",
+        "after": "119.jpg",
+        "rect": [
+          616.5,
+          495.09375,
+          333.75,
+          66
+        ],
+        "stay": true
+      },
+      {
+        "type": "type",
+        "before": "120.jpg",
+        "after": "121.jpg",
+        "rect": [
+          969.75,
+          495.09375,
+          333.75,
+          66
+        ],
+        "stay": true
+      },
+      {
+        "type": "type",
+        "before": "122.jpg",
+        "after": "123.jpg",
+        "rect": [
+          616.5,
+          733.59375,
+          687,
+          66
+        ],
+        "stay": true
+      },
+      {
+        "type": "click",
+        "before": "124.jpg",
+        "after": "125.jpg",
+        "rect": [
+          1164.6328125,
+          847.59375,
+          138.8671875,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Inventory valuation",
+    "say": "Stock updates immediately, the alert clears, and a weighted-average cost values the inventory.",
+    "events": [
+      {
+        "type": "focus",
+        "before": "126.jpg",
+        "after": "126.jpg",
+        "rect": [
+          431.0859375,
+          931.078125,
+          1429.828125,
+          64.5
+        ],
+        "label": "Updated stock & cost"
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Cash management",
+    "say": "Cash Management shows every cashier shift, with the expected cash, counted cash, and variance.",
+    "events": [
+      {
+        "type": "click",
+        "before": "127.jpg",
+        "after": "128.jpg",
+        "rect": [
+          18,
+          498,
+          334.5,
+          66
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "129.jpg",
+        "after": "129.jpg",
+        "rect": [
+          431.0859375,
+          725.578125,
+          1429.828125,
+          85.5
+        ],
+        "label": "Today's shift"
+      },
+      {
+        "type": "click",
+        "before": "130.jpg",
+        "after": "131.jpg",
+        "rect": [
+          1744.1484375,
+          745.828125,
+          75.609375,
+          45
+        ]
+      },
+      {
+        "type": "click",
+        "before": "132.jpg",
+        "after": "133.jpg",
+        "rect": [
+          1447.5,
+          281.15625,
+          51,
+          51
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Reports",
+    "say": "Reports show daily revenue, top-selling products, and the payment method mix.",
+    "events": [
+      {
+        "type": "click",
+        "before": "134.jpg",
+        "after": "135.jpg",
+        "rect": [
+          18,
+          571.5,
+          334.5,
+          66
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "136.jpg",
+        "after": "136.jpg",
+        "rect": [
+          429.5859375,
+          505.6875,
+          1432.828125,
+          207
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "137.jpg",
+        "after": "137.jpg",
+        "rect": [
+          429.5859375,
+          6.1875,
+          1432.828125,
+          1073.8125
+        ],
+        "label": "Revenue · Top sellers · Payments"
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Reports",
+    "say": "The inventory report covers stock value, deliveries, ingredient usage, and alerts. Both reports export to PDF or CSV.",
+    "events": [
+      {
+        "type": "click",
+        "before": "138.jpg",
+        "after": "139.jpg",
+        "rect": [
+          1148.25,
+          301.6875,
+          708.1640625,
+          55.5
+        ]
+      },
+      {
+        "type": "click",
+        "before": "140.jpg",
+        "after": "141.jpg",
+        "rect": [
+          1633.1484375,
+          415.6875,
+          229.265625,
+          63
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "142.jpg",
+        "after": "142.jpg",
+        "rect": [
+          616.5,
+          444.84375,
+          687,
+          240
+        ],
+        "label": "PDF · CSV"
+      },
+      {
+        "type": "click",
+        "before": "143.jpg",
+        "after": "144.jpg",
+        "rect": [
+          1252.5,
+          293.15625,
+          51,
+          51
+        ]
+      }
+    ]
+  },
+  {
+    "device": "web",
+    "section": "Web · Settings",
+    "say": "In Settings, the admin manages their profile and password, and uploads the G-Cash and Maya QR codes used by the tablet.",
+    "events": [
+      {
+        "type": "click",
+        "before": "145.jpg",
+        "after": "146.jpg",
+        "rect": [
+          18,
+          645,
+          334.5,
+          66
+        ]
+      },
+      {
+        "type": "focus",
+        "before": "147.jpg",
+        "after": "147.jpg",
+        "rect": [
+          561,
+          502.875,
+          1170,
+          577.125
+        ],
+        "label": "Shared payment QR"
+      }
+    ]
+  },
+  {
+    "card": {
+      "kind": "outro",
+      "section": "Summary",
+      "say": "In summary: a complete point of sale with Cash, G-Cash and Maya; recipe-based automatic inventory deduction; low-stock alerts; cashier shift reconciliation; reports with PDF and CSV export; and direct Bluetooth receipt printing. Thank you."
+    },
+    "say": "In summary: Cash, G-Cash and Maya payments, automatic recipe-based inventory, low-stock alerts, shift reconciliation, exportable reports, and Bluetooth receipt printing. Thank you!",
+    "section": "Summary"
+  }
+]
