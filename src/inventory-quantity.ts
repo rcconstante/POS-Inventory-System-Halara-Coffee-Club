@@ -31,9 +31,15 @@ export function stockUnits(base: string): StockUnit[] {
 }
 
 export function stockQuantity(input: string, factor = 1): number {
-  if (!input.trim() || !Number.isFinite(factor) || factor <= 0)
+  const trimmed = input.trim();
+  if (!trimmed || !Number.isFinite(factor) || factor <= 0)
     throw new Error("Enter a valid quantity and unit.");
-  const value = Number(input) * factor;
+  if (
+    trimmed.includes(",") &&
+    !/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(trimmed)
+  )
+    throw new Error("Enter a valid quantity and unit.");
+  const value = Number(trimmed.replace(/,/g, "")) * factor;
   const rounded = Math.round(value * 1000) / 1000;
   if (
     !Number.isFinite(value) ||

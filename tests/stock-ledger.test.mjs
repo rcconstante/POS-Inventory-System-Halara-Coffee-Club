@@ -74,6 +74,20 @@ test("stock ledger records every in/out change with the running balance", async 
     assert.equal((await ledger()).at(-1).balance_after, await stock());
     const net = (await db.query("select sum(change)::float8 as s from stock_ledger where product_id=$1", [beans])).rows[0].s;
     assert.equal(net, await stock());
+    // Cash refunds cannot overdraw the drawer (migration 014).
+    await db.exec(`alter table cash_shifts add column opening_balance_centavos bigint default 0;
+ create table cash_movements(id uuid default gen_random_uuid(), shift_id uuid, movement_type text, amount_centavos bigint);`);
+    await db.exec(fn(m006, "cash_shift_expected"));
+    await db.exec(readFileSync("supabase/migrations/014_cash_refund_guard.sql", "utf8"));
+    const cash = (await db.query("select * from create_sale('Cash',$1::jsonb,20000,gen_random_uuid())", [JSON.stringify([{ product_id: drink, quantity: 1 }])])).rows[0];
+    const shift = (await db.query("select cash_shift_id from sales where id=$1", [cash.id])).rows[0].cash_shift_id;
+    await db.query("insert into cash_movements(shift_id,movement_type,amount_centavos) values($1,'Cash Out',10000)", [shift]);
+    const beforeRefund = await stock();
+    await assert.rejects(db.query("select set_sale_status($1,'Cancelled')", [cash.id]), /not have enough cash/);
+    assert.equal(await stock(), beforeRefund);
+    await db.query("insert into cash_movements(shift_id,movement_type,amount_centavos) values($1,'Cash In',20000)", [shift]);
+    await db.query("select set_sale_status($1,'Cancelled')", [cash.id]);
+    assert.equal(await stock(), beforeRefund + 18);
     // Finished products never get ledger rows.
     assert.equal((await db.query("select count(*)::int as n from stock_ledger where product_id=$1", [drink])).rows[0].n, 0);
   } finally {

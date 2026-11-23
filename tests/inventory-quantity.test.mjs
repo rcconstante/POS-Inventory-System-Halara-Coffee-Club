@@ -41,7 +41,6 @@ test("invalid, non-finite, zero and unrepresentable quantities are rejected", ()
   for (const value of [
     "",
     "5k",
-    "5,000",
     "NaN",
     "Infinity",
     "-5",
@@ -52,4 +51,12 @@ test("invalid, non-finite, zero and unrepresentable quantities are rejected", ()
   assert.throws(() => stockQuantity("5", NaN));
   assert.equal(stockQuantity("0.000001", 1000), 0.001);
   assert.equal(stockQuantity(".125"), 0.125);
+});
+
+test("comma-formatted delivery quantities are accepted", () => {
+  assert.equal(stockQuantity("5,000"), 5000);
+  assert.equal(stockQuantity("12,500.5"), 12500.5);
+  assert.equal(stockQuantity("1,000,000.125"), 1000000.125);
+  for (const malformed of ["5,5", "5,00", ",500", "5,,000", "5,000,"])
+    assert.throws(() => stockQuantity(malformed));
 });

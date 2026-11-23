@@ -105,44 +105,48 @@ async function removeStorageFile(bucket: "product-images" | "avatars", path: str
 // Supabase returns at most 1,000 rows per request; read every page so totals never undercount.
 // shortcut: stops on a short page, so it assumes the project's API max-rows stays at 1,000 (the Supabase default); change PAGE if that setting changes.
 const PAGE = 1000;
-async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>): Promise<T[]> {
-  const rows: T[] = [];
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>, key: (row: T) => string): Promise<T[]> {
+  // Keyed so a row pushed onto the next page by a concurrent insert is not counted twice.
+  const rows = new Map<string, T>();
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await page(from, from + PAGE - 1);
     if (error) fail(error);
-    rows.push(...((data ?? []) as T[]));
-    if (!data || data.length < PAGE) return rows;
+    for (const row of (data ?? []) as T[]) rows.set(key(row), row);
+    if (!data || data.length < PAGE) return [...rows.values()];
   }
 }
 
 export const LEDGER_LIMIT = 1000;
-async function loadStockLedger(): Promise<StockLedgerEntry[] | null> {
-  const { data, error } = await supabase.from("stock_ledger").select("id, product_id, change, balance_after, kind, reference, actor_name, reconstructed, created_at").order("created_at", { ascending: false }).order("id", { ascending: false }).limit(LEDGER_LIMIT);
+async function loadStockLedger(productId?: string): Promise<StockLedgerEntry[] | null> {
+  let query = supabase.from("stock_ledger").select("id, product_id, change, balance_after, kind, reference, actor_name, reconstructed, created_at");
+  // Filter on the server so slow-moving materials are not pushed out by busy ones.
+  if (productId) query = query.eq("product_id", productId);
+  const { data, error } = await query.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(LEDGER_LIMIT);
   // null = migration 013 not applied yet; the rest of the app keeps working.
   if (error) { if (["42P01", "PGRST205"].includes((error as { code?: string }).code ?? "")) return null; fail(error); }
   return ((data ?? []) as LedgerRow[]).map((row) => ({ id: row.id, productId: row.product_id, change: Number(row.change), balanceAfter: Number(row.balance_after), kind: row.kind, reference: row.reference, actorName: row.actor_name, reconstructed: row.reconstructed, createdAt: row.created_at }));
 }
 
-async function loadAppData(): Promise<AppData> {
+async function loadAppData(ledgerProductId?: string): Promise<AppData> {
   const [categoryResult, productResult, recipeResult, movementRows, saleRows, itemRows, shiftRows, cashMovementRows, usageRows, stockLedger] = await Promise.all([
     supabase.from("categories").select("id, name").order("name"),
     supabase.from("products").select("id, name, category_id, product_type, tracks_inventory, unit, current_stock, low_stock_threshold, average_unit_cost_centavos, cost_initialized, price_centavos, image_path").eq("active", true).order("name"),
-    supabase.from("product_recipes").select("finished_product_id, ingredient_id, quantity").order("created_at"),
-    fetchAll<MovementRow>((from, to) => supabase.from("inventory_movements").select("id, product_id, quantity, movement_date, note, total_cost_centavos, unit_cost_centavos").order("movement_date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, to)),
-    fetchAll<SaleRow>((from, to) => supabase.from("sales").select("id, receipt, business_date, payment_method, status, total_centavos, created_at, created_by, cashier_name, cash_shift_id, cash_received_centavos, change_centavos").order("business_date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, to)),
-    fetchAll<SaleItemRow>((from, to) => supabase.from("sale_items").select("sale_id, product_id, product_name, quantity, unit_price_centavos, line_total_centavos").order("id").range(from, to)),
-    fetchAll<CashShiftRow>((from, to) => supabase.from("cash_shift_summaries").select("id, opened_by, cashier_name, status, opening_balance_centavos, opened_at, closed_at, counted_cash_centavos, expected_cash_centavos, variance_centavos, closing_note, cash_sales_centavos, digital_sales_centavos, cash_in_centavos, cash_out_centavos").order("opened_at", { ascending: false }).order("id").range(from, to)),
-    fetchAll<CashMovementRow>((from, to) => supabase.from("cash_movements").select("id, shift_id, movement_type, amount_centavos, reason, created_at").order("created_at", { ascending: false }).order("id").range(from, to)),
-    fetchAll<UsageRow>((from, to) => supabase.from("sale_ingredient_usage").select("sale_id, ingredient_id, ingredient_name, quantity, unit").order("sale_id").order("ingredient_id").range(from, to)),
-    loadStockLedger(),
+    fetchAll<RecipeRow>((from, to) => supabase.from("product_recipes").select("finished_product_id, ingredient_id, quantity").order("created_at").order("finished_product_id").order("ingredient_id").range(from, to), (row) => `${row.finished_product_id}:${row.ingredient_id}`),
+    fetchAll<MovementRow>((from, to) => supabase.from("inventory_movements").select("id, product_id, quantity, movement_date, note, total_cost_centavos, unit_cost_centavos").order("movement_date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, to), (row) => row.id),
+    fetchAll<SaleRow>((from, to) => supabase.from("sales").select("id, receipt, business_date, payment_method, status, total_centavos, created_at, created_by, cashier_name, cash_shift_id, cash_received_centavos, change_centavos").order("business_date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, to), (row) => row.id),
+    fetchAll<SaleItemRow & { id: string }>((from, to) => supabase.from("sale_items").select("id, sale_id, product_id, product_name, quantity, unit_price_centavos, line_total_centavos").order("id").range(from, to), (row) => row.id),
+    fetchAll<CashShiftRow>((from, to) => supabase.from("cash_shift_summaries").select("id, opened_by, cashier_name, status, opening_balance_centavos, opened_at, closed_at, counted_cash_centavos, expected_cash_centavos, variance_centavos, closing_note, cash_sales_centavos, digital_sales_centavos, cash_in_centavos, cash_out_centavos").order("opened_at", { ascending: false }).order("id").range(from, to), (row) => row.id),
+    fetchAll<CashMovementRow>((from, to) => supabase.from("cash_movements").select("id, shift_id, movement_type, amount_centavos, reason, created_at").order("created_at", { ascending: false }).order("id").range(from, to), (row) => row.id),
+    fetchAll<UsageRow>((from, to) => supabase.from("sale_ingredient_usage").select("sale_id, ingredient_id, ingredient_name, quantity, unit").order("sale_id").order("ingredient_id").range(from, to), (row) => `${row.sale_id}:${row.ingredient_id}`),
+    loadStockLedger(ledgerProductId),
   ]);
-  for (const result of [categoryResult, productResult, recipeResult]) if (result.error) fail(result.error);
+  for (const result of [categoryResult, productResult]) if (result.error) fail(result.error);
   const itemsBySale = new Map<string, SaleItem[]>();
   for (const row of itemRows) {
     const item = { productId: row.product_id, name: row.product_name, quantity: row.quantity, unitPrice: Number(row.unit_price_centavos) / 100 };
     itemsBySale.set(row.sale_id, [...(itemsBySale.get(row.sale_id) ?? []), item]);
   }
-  const recipeRows = (recipeResult.data ?? []) as RecipeRow[];
+  const recipeRows = recipeResult;
   const products: Product[] = ((productResult.data ?? []) as ProductRow[]).map((row) => ({
     id: row.id,
     name: row.name,
@@ -171,7 +175,7 @@ async function loadAppData(): Promise<AppData> {
           ? Math.max(0, Math.min(...product.recipe.map((recipe) => {
               const ingredient = productsById.get(recipe.ingredientId);
               return ingredient?.type === "raw_material" && recipe.quantity > 0
-                ? Math.floor(ingredient.currentStock / recipe.quantity)
+                ? Math.floor(Math.round(ingredient.currentStock * 1000) / Math.round(recipe.quantity * 1000))
                 : 0;
             })))
           : 0;
@@ -314,12 +318,12 @@ async function buildInventoryReport(from: string, to: string): Promise<Inventory
   if (from > to) throw new Error("Start date must be on or before end date.");
   const [data, alertResult] = await Promise.all([
     loadAppData(),
-    fetchAll<{ type: string; severity: string; product_id: string; created_at: string; resolved_at: string | null }>((start, end) => supabase.from("notifications").select("id, type, severity, product_id, created_at, resolved_at").gte("created_at", `${from}T00:00:00+08:00`).lte("created_at", `${to}T23:59:59+08:00`).order("created_at", { ascending: false }).order("id").range(start, end)),
+    fetchAll<{ type: string; severity: string; product_id: string; created_at: string; resolved_at: string | null }>((start, end) => supabase.from("notifications").select("id, type, severity, product_id, created_at, resolved_at").gte("created_at", `${from}T00:00:00+08:00`).lt("created_at", new Date(Date.parse(`${to}T00:00:00+08:00`) + 86_400_000).toISOString()).order("created_at", { ascending: false }).order("id").range(start, end), (row) => (row as { id?: string }).id ?? row.created_at),
   ]);
   const materials = data.products.filter((product) => product.type === "raw_material");
   const stock = materials.map((product) => ({
     name: product.name, unit: product.unit, quantity: product.currentStock,
-    averageUnitCostCentavos: product.costInitialized ? Math.round(product.averageUnitCost * 100) : null,
+    averageUnitCostCentavos: product.costInitialized ? product.averageUnitCost * 100 : null,
     valueCentavos: product.costInitialized ? Math.round(product.currentStock * product.averageUnitCost * 100) : null,
     threshold: product.lowStockThreshold,
     status: product.currentStock <= 0 ? "Out of stock" : product.currentStock <= product.lowStockThreshold ? "Low stock" : "Available",
@@ -328,7 +332,7 @@ async function buildInventoryReport(from: string, to: string): Promise<Inventory
   const usageMap = new Map<string, { name: string; quantity: number; unit: string }>();
   data.ingredientUsage.filter((usage) => completedSaleIds.has(usage.saleId)).forEach((usage) => {
     const current = usageMap.get(usage.ingredientId) ?? { name: usage.ingredientName, quantity: 0, unit: usage.unit };
-    current.quantity += usage.quantity; usageMap.set(usage.ingredientId, current);
+    current.quantity = Math.round((current.quantity + usage.quantity) * 1000) / 1000; usageMap.set(usage.ingredientId, current);
   });
   const productById = new Map(materials.map((product) => [product.id, product]));
   const alerts = alertResult.map((row) => ({
@@ -343,9 +347,9 @@ async function buildInventoryReport(from: string, to: string): Promise<Inventory
       lowStockCount: stock.filter((row) => row.status !== "Available").length,
     },
     stock,
-    movements: data.stockMovements.filter((movement) => movement.date >= from && movement.date <= to).map((movement) => ({
-      date: movement.date, name: productById.get(movement.productId)?.name ?? "Deleted material", quantity: movement.quantity,
-      unit: productById.get(movement.productId)?.unit ?? "", totalCostCentavos: movement.totalCost === null ? null : Math.round(movement.totalCost * 100), note: movement.note,
+    movements: data.stockMovements.filter((movement) => movement.date >= from && movement.date <= to && productById.has(movement.productId)).map((movement) => ({
+      date: movement.date, name: productById.get(movement.productId)!.name, quantity: movement.quantity,
+      unit: productById.get(movement.productId)!.unit, totalCostCentavos: movement.totalCost === null ? null : Math.round(movement.totalCost * 100), note: movement.note,
     })),
     usage: [...usageMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
     alerts,
@@ -471,7 +475,7 @@ export const api = {
     if (previousAvatarPath && previousAvatarPath !== avatarPath) await removeStorageFile("avatars", previousAvatarPath);
     return profileSession(user);
   },
-  appData: loadAppData,
+  appData: (ledgerProductId?: string) => loadAppData(ledgerProductId),
   async createCategory(name: string): Promise<Category> {
     const { data, error } = await supabase.from("categories").insert({ name: name.trim() }).select("id, name").single();
     if (error || !data) fail(error); return data as Category;
@@ -564,7 +568,7 @@ export const api = {
   async downloadReport(format: "pdf" | "csv", from: string, to: string): Promise<void> { const report = await buildReport(from, to); if (format === "pdf") await savePdf(report); else await saveCsv(report); },
   async downloadInventoryReport(format: "pdf" | "csv", from: string, to: string): Promise<void> { const report = await buildInventoryReport(from, to); if (format === "pdf") await saveInventoryPdf(report); else await saveInventoryCsv(report); },
   subscribeWorkspace(onChange: () => void): () => void {
-    const tables = ["products", "inventory_movements", "sales", "sale_items", "sale_ingredient_usage", "notifications", "notification_reads", "cash_shifts", "cash_movements", "payment_settings"];
+    const tables = ["products", "inventory_movements", "sales", "sale_items", "sale_ingredient_usage", "notifications", "notification_reads", "cash_shifts", "cash_movements", "payment_settings", "stock_ledger"];
     let channel = supabase.channel(`workspace-${crypto.randomUUID()}`);
     tables.forEach((table) => { channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange); });
     void channel.subscribe();

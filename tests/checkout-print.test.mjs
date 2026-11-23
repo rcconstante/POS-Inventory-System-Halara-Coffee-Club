@@ -6,7 +6,7 @@ import ts from 'typescript';
 
 // Execute the actual checkout functions without bootstrapping the DOM or issuing sales.
 const source = ts.createSourceFile('app.ts', readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = new Set(['getAutoPrint', 'confirmPayment']);
+const names = new Set(['getAutoPrint', 'confirmPayment', 'centavos']);
 const functions = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text));
 assert.equal(functions.length, names.size);
 const code = ts.transpileModule(`let paymentSaving = false; const autoPrintStorageKey = 'halara-pos-autoprint';
@@ -79,4 +79,14 @@ test('refresh failure does not print an older completed receipt', async () => {
   target.ui.completedSale = { id: 'older-sale' };
   await assert.rejects(target.api.confirmPayment(), /Refresh failed/);
   assert.equal(target.calls.includes('print'), false);
+});
+
+test('a saved sale clears the order so it cannot be submitted again', async () => {
+  const target = checkout({ autoPrint: 'false' });
+  await target.api.confirmPayment();
+  assert.equal(target.ui.cart.length, 0);
+  assert.equal(target.ui.paymentReference, null);
+  assert.equal(target.ui.selectedPayment, null);
+  assert.equal(target.ui.cashReceived, null);
+  assert.equal(target.ui.completedSale.id, 'saved-sale');
 });

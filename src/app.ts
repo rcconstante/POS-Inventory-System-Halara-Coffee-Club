@@ -181,6 +181,7 @@ function hydrate(root: HTMLElement | Document = document): void {
 
 const money = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
 const number = new Intl.NumberFormat("en-PH", { maximumFractionDigits: 3 });
+const unitCost = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const compactDate = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" });
 const manilaDateTime = new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 const manilaIsoDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -300,7 +301,7 @@ function restorePosState(): void {
       paymentReference?: string | null;
       completedSaleId?: string | null;
     } | null;
-    const remaining = new Map(rawMaterials().map((material) => [material.id, material.currentStock]));
+    const remaining = new Map(rawMaterials().map((material) => [material.id, Math.round(material.currentStock * 1000)]));
     ui.cart = [];
     for (const item of saved?.cart ?? []) {
       const product = ui.data.products.find((candidate) => candidate.id === item.productId);
@@ -310,11 +311,14 @@ function restorePosState(): void {
         continue;
       }
       if (!product.recipe.length) continue;
-      const available = Math.max(0, Math.min(...product.recipe.map((recipe) => Math.floor((remaining.get(recipe.ingredientId) ?? 0) / recipe.quantity))));
+      const available = Math.max(0, Math.min(...product.recipe.map((recipe) => {
+        const required = Math.round(recipe.quantity * 1000);
+        return required > 0 ? Math.floor((remaining.get(recipe.ingredientId) ?? 0) / required) : 0;
+      })));
       const quantity = Math.min(item.quantity, available);
       if (quantity <= 0) continue;
       ui.cart.push({ productId: item.productId, quantity });
-      for (const recipe of product.recipe) remaining.set(recipe.ingredientId, (remaining.get(recipe.ingredientId) ?? 0) - recipe.quantity * quantity);
+      for (const recipe of product.recipe) remaining.set(recipe.ingredientId, (remaining.get(recipe.ingredientId) ?? 0) - Math.round(recipe.quantity * 1000) * quantity);
     }
     ui.selectedPayment = saved?.selectedPayment === "Cash" || saved?.selectedPayment === "GCash" || saved?.selectedPayment === "Maya" ? saved.selectedPayment : null;
     ui.cashReceived = typeof saved?.cashReceived === "number" && Number.isFinite(saved.cashReceived) && saved.cashReceived >= 0 ? saved.cashReceived : null;
@@ -385,7 +389,7 @@ async function refreshAll(shouldRender = true): Promise<void> {
   // wait for it, then fetch again so saved stock never shows the old balance.
   while (refreshPromise) await refreshPromise.catch(() => undefined);
   {
-    refreshPromise = Promise.all([api.appData(), api.notifications(), api.paymentQrSettings().then((images) => ({ images, error: null as string | null })).catch((error: unknown) => ({ images: { GCash: null, Maya: null }, error: errorMessage(error) }))]).then(([data, notificationData, qr]) => {
+    refreshPromise = Promise.all([api.appData(ui.ledgerProduct === "all" ? undefined : ui.ledgerProduct), api.notifications(), api.paymentQrSettings().then((images) => ({ images, error: null as string | null })).catch((error: unknown) => ({ images: { GCash: null, Maya: null }, error: errorMessage(error) }))]).then(([data, notificationData, qr]) => {
       ui.data = data;
       ui.paymentQr = qr.images;
       ui.paymentQrError = qr.error;
@@ -632,7 +636,7 @@ function categoryCard(category: Category): string {
 function renderInventory(): string {
   const materials = rawMaterials();
   const movements = ui.data.stockMovements.filter((movement) => materials.some((product) => product.id === movement.productId));
-  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Delivery quantities stay in history. On hand now includes all deliveries, sales deductions and refunds.", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel valuation-table"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Current value</th><th>Action</th></tr></thead><tbody>${materials.map((product) => `<tr><td data-label="Material"><strong>${escapeHtml(product.name)}</strong></td><td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Average cost">${product.costInitialized ? `${money.format(product.averageUnitCost)} / ${escapeHtml(product.unit)}` : "Uncosted"}</td><td data-label="Current value">${product.costInitialized ? money.format(product.currentStock * product.averageUnitCost) : "Excluded"}</td><td data-label="Action">${product.costInitialized ? "—" : product.currentStock > 0 ? `<button class="small-button" data-action="set-cost-baseline" data-id="${product.id}">Set starting cost</button>` : "Add costed stock"}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Purchase cost</th><th>On hand now</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Purchase cost">${movement.totalCost === null ? "Uncosted legacy entry" : money.format(movement.totalCost)}</td><td data-label="On hand now">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="7">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article>${stockHistoryPanel(materials)}</section>`;
+  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Delivery quantities stay in history. On hand now includes all deliveries, sales deductions and refunds.", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel valuation-table"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Current value</th><th>Action</th></tr></thead><tbody>${materials.map((product) => `<tr><td data-label="Material"><strong>${escapeHtml(product.name)}</strong></td><td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Average cost">${product.costInitialized ? `${unitCost.format(product.averageUnitCost)} / ${escapeHtml(product.unit)}` : "Uncosted"}</td><td data-label="Current value">${product.costInitialized ? money.format(product.currentStock * product.averageUnitCost) : "Excluded"}</td><td data-label="Action">${product.costInitialized ? "—" : product.currentStock > 0 ? `<button class="small-button" data-action="set-cost-baseline" data-id="${product.id}">Set starting cost</button>` : "Add costed stock"}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Purchase cost</th><th>On hand now</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Purchase cost">${movement.totalCost === null ? "Uncosted legacy entry" : money.format(movement.totalCost)}</td><td data-label="On hand now">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="7">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article>${stockHistoryPanel(materials)}</section>`;
 }
 
 function stockHistoryPanel(materials: Product[]): string {
@@ -672,7 +676,7 @@ function renderReports(): string {
   const inventory = ui.inventoryReport;
   const tabs = `<div class="tabs"><button data-report-tab="sales" class="${ui.reportTab === "sales" ? "active" : ""}">Sales</button><button data-report-tab="inventory" class="${ui.reportTab === "inventory" ? "active" : ""}">Inventory</button></div>`;
   const salesBody = !report ? emptyState("BarChart3", "Report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Total sales", money.format(report.summary.totalSalesCentavos / 100), "Completed revenue", "BarChart3", "accent")}${metric("Transactions", String(report.summary.totalTransactions), "Completed orders", "CircleCheck", "success")}${metric("Average sale", money.format(report.summary.averageSaleCentavos / 100), "Per completed order", "Receipt")}</div><div class="report-grid"><article class="panel report-chart"><div class="panel-heading"><div><p class="eyebrow">Sales over time</p><h3>Daily revenue</h3></div></div>${revenueBars(report.daily)}</article><article class="panel report-ranking"><div class="panel-heading"><div><p class="eyebrow">Product mix</p><h3>Top sellers</h3></div></div>${report.topProducts.length ? `<ol class="rank-list">${report.topProducts.slice(0, 7).map((product, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.quantity} units sold</small></div><b>${money.format(product.totalCentavos / 100)}</b></li>`).join("")}</ol>` : emptyState("Box", "No completed sales", "Product rankings will appear after the first completed order.")}</article><article class="panel payment-summary"><div class="panel-heading"><div><p class="eyebrow">Payment mix</p><h3>Payment methods</h3></div></div>${report.payments.length ? `<div class="payment-list">${report.payments.map((item) => `<div><span>${escapeHtml(item.method)}<small>${item.transactions} transaction${item.transactions === 1 ? "" : "s"}</small></span><strong>${money.format(item.totalCentavos / 100)}</strong></div>`).join("")}</div>` : emptyState("WalletCards", "No payment activity", "Payment methods will appear after the first completed order.")}</article></div>`;
-  const inventoryBody = !inventory ? emptyState("Boxes", "Inventory report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Current value", money.format(inventory.summary.totalValueCentavos / 100), `${inventory.summary.valuedMaterials}/${inventory.summary.materialCount} materials costed`, "BarChart3", "accent")}${metric("Raw materials", String(inventory.summary.materialCount), "Current catalog", "Boxes")}${metric("Stock alerts", String(inventory.summary.lowStockCount), "Needs attention", "CircleAlert", inventory.summary.lowStockCount ? "warning" : "success")}</div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Value</th><th>Threshold</th><th>Status</th></tr></thead><tbody>${inventory.stock.map((row) => `<tr><td data-label="Material"><strong>${escapeHtml(row.name)}</strong></td><td data-label="On hand">${number.format(row.quantity)} ${escapeHtml(row.unit)}</td><td data-label="Average cost">${row.averageUnitCostCentavos === null ? "Uncosted" : `${money.format(row.averageUnitCostCentavos / 100)} / ${escapeHtml(row.unit)}`}</td><td data-label="Value">${row.valueCentavos === null ? "Excluded" : money.format(row.valueCentavos / 100)}</td><td data-label="Threshold">${number.format(row.threshold)} ${escapeHtml(row.unit)}</td><td data-label="Status">${statusPill(row.status)}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel report-movement-table"><div class="panel-heading"><div><p class="eyebrow">Purchasing</p><h3>Stock movements in selected range</h3></div></div><div class="table-scroll"><table><thead><tr><th>Date</th><th>Material</th><th>Quantity</th><th>Purchase cost</th><th>Note</th></tr></thead><tbody>${inventory.movements.length ? inventory.movements.map((row) => `<tr><td data-label="Date">${formatDate(row.date)}</td><td data-label="Material"><strong>${escapeHtml(row.name)}</strong></td><td data-label="Quantity">+${number.format(row.quantity)} ${escapeHtml(row.unit)}</td><td data-label="Purchase cost">${row.totalCostCentavos === null ? "Uncosted" : money.format(row.totalCostCentavos / 100)}</td><td data-label="Note">${escapeHtml(row.note || "—")}</td></tr>`).join("") : `<tr><td colspan="5">${emptyState("Truck", "No stock movements in range", "Costed supplier deliveries will appear here.")}</td></tr>`}</tbody></table></div></article><div class="report-grid inventory-report-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Consumption</p><h3>Ingredient usage</h3></div></div>${inventory.usage.length ? inventory.usage.map((row) => `<div class="report-line"><span>${escapeHtml(row.name)}</span><strong>${number.format(row.quantity)} ${escapeHtml(row.unit)}</strong></div>`).join("") : emptyState("Coffee", "No ingredient usage", "Completed recipe sales will appear here.")}</article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">History</p><h3>Low-stock alerts</h3></div></div>${inventory.alerts.length ? inventory.alerts.slice(0, 12).map((row) => `<div class="report-line"><span>${escapeHtml(row.name)}<small>${escapeHtml(formatDateTime(row.createdAt))}</small></span>${statusPill(row.resolvedAt ? "Resolved" : "Active")}</div>`).join("") : emptyState("CircleCheck", "No alerts in range", "Low-stock history will appear here.")}</article></div>`;
+  const inventoryBody = !inventory ? emptyState("Boxes", "Inventory report unavailable", "Choose a valid date range and try again.") : `<div class="metric-grid report-metrics">${metric("Current value", money.format(inventory.summary.totalValueCentavos / 100), `${inventory.summary.valuedMaterials}/${inventory.summary.materialCount} materials costed`, "BarChart3", "accent")}${metric("Raw materials", String(inventory.summary.materialCount), "Current catalog", "Boxes")}${metric("Stock alerts", String(inventory.summary.lowStockCount), "Needs attention", "CircleAlert", inventory.summary.lowStockCount ? "warning" : "success")}</div><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Value</th><th>Threshold</th><th>Status</th></tr></thead><tbody>${inventory.stock.map((row) => `<tr><td data-label="Material"><strong>${escapeHtml(row.name)}</strong></td><td data-label="On hand">${number.format(row.quantity)} ${escapeHtml(row.unit)}</td><td data-label="Average cost">${row.averageUnitCostCentavos === null ? "Uncosted" : `${unitCost.format(row.averageUnitCostCentavos / 100)} / ${escapeHtml(row.unit)}`}</td><td data-label="Value">${row.valueCentavos === null ? "Excluded" : money.format(row.valueCentavos / 100)}</td><td data-label="Threshold">${number.format(row.threshold)} ${escapeHtml(row.unit)}</td><td data-label="Status">${statusPill(row.status)}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel report-movement-table"><div class="panel-heading"><div><p class="eyebrow">Purchasing</p><h3>Stock movements in selected range</h3></div></div><div class="table-scroll"><table><thead><tr><th>Date</th><th>Material</th><th>Quantity</th><th>Purchase cost</th><th>Note</th></tr></thead><tbody>${inventory.movements.length ? inventory.movements.map((row) => `<tr><td data-label="Date">${formatDate(row.date)}</td><td data-label="Material"><strong>${escapeHtml(row.name)}</strong></td><td data-label="Quantity">+${number.format(row.quantity)} ${escapeHtml(row.unit)}</td><td data-label="Purchase cost">${row.totalCostCentavos === null ? "Uncosted" : money.format(row.totalCostCentavos / 100)}</td><td data-label="Note">${escapeHtml(row.note || "—")}</td></tr>`).join("") : `<tr><td colspan="5">${emptyState("Truck", "No stock movements in range", "Costed supplier deliveries will appear here.")}</td></tr>`}</tbody></table></div></article><div class="report-grid inventory-report-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">Consumption</p><h3>Ingredient usage</h3></div></div>${inventory.usage.length ? inventory.usage.map((row) => `<div class="report-line"><span>${escapeHtml(row.name)}</span><strong>${number.format(row.quantity)} ${escapeHtml(row.unit)}</strong></div>`).join("") : emptyState("Coffee", "No ingredient usage", "Completed recipe sales will appear here.")}</article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">History</p><h3>Low-stock alerts</h3></div></div>${inventory.alerts.length ? inventory.alerts.slice(0, 12).map((row) => `<div class="report-line"><span>${escapeHtml(row.name)}<small>${escapeHtml(formatDateTime(row.createdAt))}</small></span>${statusPill(row.resolvedAt ? "Resolved" : "Active")}</div>`).join("") : emptyState("CircleCheck", "No alerts in range", "Low-stock history will appear here.")}</article></div>`;
   return `<section class="page-section">${pageHeading("Performance", ui.reportTab === "sales" ? "Sales report" : "Inventory report", "Metrics and exports are calculated from authoritative SQL transactions")}${tabs}
     <div class="report-toolbar" aria-label="Report date range"><label><span>From</span><input id="report-from" type="date" value="${ui.reportRange.from}" /></label><span aria-hidden="true">to</span><label><span>To</span><input id="report-to" type="date" value="${ui.reportRange.to}" /></label><button class="button primary" data-action="generate-report" ${ui.reportLoading ? "disabled" : ""}>${ui.reportLoading ? icon("LoaderCircle", "spin") : icon("Download")} Generate report</button></div>
     ${ui.reportLoading ? `<div class="route-loading">${icon("LoaderCircle", "spin")}<p>Calculating report…</p></div>` : ui.reportTab === "sales" ? salesBody : inventoryBody}
@@ -746,7 +750,7 @@ async function navigateAdmin(route: AdminRoute, replace = false): Promise<void> 
   ui.navOpen = false;
   ui.accountOpen = false;
   syncLocation(replace);
-  if (route === "reports" && !ui.report) await loadReport();
+  if (route === "reports" && !currentReport()) await loadReport();
   else renderAdmin();
 }
 
@@ -767,6 +771,7 @@ function bindAdminActions(): void {
   onAction("force-close-shift", (button) => openCloseShiftDialog(button.dataset.id!, true));
   onAction("set-cost-baseline", (button) => openCostBaselineDialog(button.dataset.id!));
   onAction("generate-report", openReportExportDialog);
+  onAction("sales-csv", async () => { const first = ui.data.sales.reduce((min, sale) => sale.date < min ? sale.date : min, manilaDate()); await api.downloadReport("csv", first, manilaDate()); });
   document.querySelectorAll<HTMLButtonElement>("[data-report-tab]").forEach((button) => button.addEventListener("click", async () => {
     ui.reportTab = button.dataset.reportTab as ReportTab;
     await loadReport();
@@ -812,8 +817,10 @@ function bindFilters(): void {
     row.hidden = !(row.dataset.search ?? "").includes(salesSearch?.value.toLowerCase() ?? "") || (!!salesStatus && salesStatus.value !== "all" && row.dataset.status !== salesStatus.value);
   });
   salesSearch?.addEventListener("input", apply); salesStatus?.addEventListener("change", apply);
-  document.querySelector<HTMLSelectElement>("#ledger-material")?.addEventListener("change", (event) => { ui.ledgerProduct = (event.currentTarget as HTMLSelectElement).value; renderAdmin(); });
+  document.querySelector<HTMLSelectElement>("#ledger-material")?.addEventListener("change", (event) => { ui.ledgerProduct = (event.currentTarget as HTMLSelectElement).value; void refreshAll().catch(handleError); });
 }
+
+function currentReport(): ReportSummary | InventoryReport | null { return ui.reportTab === "sales" ? ui.report : ui.inventoryReport; }
 
 async function loadReport(): Promise<void> {
   ui.reportLoading = true; renderAdmin();
@@ -899,7 +906,7 @@ function parseCashInputAmount(raw: string): number | null {
 function renderPayment(): string {
   const total = cartTotal();
   const received = ui.cashReceived ?? 0;
-  const cashValid = ui.selectedPayment !== "Cash" || received + Number.EPSILON >= total;
+  const cashValid = ui.selectedPayment !== "Cash" || centavos(received) >= centavos(total);
   const cashFields = ui.selectedPayment === "Cash" ? `<div class="cash-payment-fields"><label class="field"><span>Cash received (PHP)</span><input id="cash-received" type="text" value="${formatCashInputAmount(ui.cashReceived)}" placeholder="0.00" inputmode="decimal" autocomplete="off" required /></label><div><span>Change</span><strong id="cash-change">${money.format(Math.max(0, received - total))}</strong></div><div class="cash-quick"><button type="button" data-cash-amount="${total}">Exact</button>${[100, 200, 500, 1000, 2000, 5000].filter((amount) => amount >= total).map((amount) => `<button type="button" data-cash-amount="${amount}">${money.format(amount)}</button>`).join("")}</div></div>` : "";
   const digital = ui.selectedPayment === "GCash" || ui.selectedPayment === "Maya" ? ui.selectedPayment : null;
   const qrMessage = digital ? `<p class="payment-qr-note">${ui.paymentQrError ? "Payment QR settings could not be loaded. Tap below to retry." : ui.paymentQr[digital] ? "Show the QR to the customer, then confirm only after the payment arrives in your account." : "Confirm only after checking that the payment arrived in your account."}</p>` : "";
@@ -1077,7 +1084,7 @@ function bindStaff(): void {
       persistPosState();
       const total = cartTotal();
       const currentReceived = ui.cashReceived ?? 0;
-      const isValid = currentReceived + Number.EPSILON >= total;
+      const isValid = centavos(currentReceived) >= centavos(total);
       const changeEl = document.querySelector("#cash-change");
       if (changeEl) changeEl.textContent = money.format(Math.max(0, currentReceived - total));
       const confirmBtn = document.querySelector<HTMLButtonElement>('[data-action="confirm-payment"]');
@@ -1207,6 +1214,9 @@ function changeCart(productId: string, change: number): void {
 function cartCount(): number { return ui.cart.reduce((sum, item) => sum + item.quantity, 0); }
 function cartTotal(): number { return ui.cart.reduce((sum, item) => { const product = ui.data.products.find((entry) => entry.id === item.productId); return sum + (product?.price ?? 0) * item.quantity; }, 0); }
 
+function centavos(amount: number): number { return Math.round(amount * 100); }
+
+// Quantities are compared in integer thousandths, matching numeric(15,3) in the database.
 function cartIngredientsAvailable(cart: CartItem[]): boolean {
   const required = new Map<string, number>();
   for (const item of cart) {
@@ -1214,11 +1224,11 @@ function cartIngredientsAvailable(cart: CartItem[]): boolean {
     if (!product || product.type !== "finished_product") return false;
     if (!product.tracksInventory) continue;
     if (!product.recipe.length) return false;
-    for (const recipe of product.recipe) required.set(recipe.ingredientId, (required.get(recipe.ingredientId) ?? 0) + recipe.quantity * item.quantity);
+    for (const recipe of product.recipe) required.set(recipe.ingredientId, (required.get(recipe.ingredientId) ?? 0) + Math.round(recipe.quantity * 1000) * item.quantity);
   }
   return [...required].every(([ingredientId, quantity]) => {
     const ingredient = ui.data.products.find((product) => product.id === ingredientId && product.type === "raw_material");
-    return Boolean(ingredient && ingredient.currentStock + Number.EPSILON >= quantity);
+    return Boolean(ingredient && Math.round(ingredient.currentStock * 1000) >= quantity);
   });
 }
 
@@ -1226,7 +1236,7 @@ async function confirmPayment(): Promise<void> {
   if (paymentSaving) return;
   if (!ui.selectedPayment || !ui.cart.length) return;
   if (!currentCashShift()) { toast("Open a cashier shift before processing a sale.", "error"); navigateStaff("cash"); return; }
-  if (ui.selectedPayment === "Cash" && (ui.cashReceived === null || ui.cashReceived + Number.EPSILON < cartTotal())) { toast("Cash received must cover the order total.", "error"); return; }
+  if (ui.selectedPayment === "Cash" && (ui.cashReceived === null || centavos(ui.cashReceived) < centavos(cartTotal()))) { toast("Cash received must cover the order total.", "error"); return; }
   paymentSaving = true;
   try {
     ui.paymentReference ??= crypto.randomUUID();
@@ -1235,6 +1245,8 @@ async function confirmPayment(): Promise<void> {
     const result = await api.createSale(ui.selectedPayment, ui.cart, ui.selectedPayment === "Cash" ? ui.cashReceived : null, ui.paymentReference);
     await refreshAll(false);
     ui.completedSale = ui.data.sales.find((sale) => sale.id === result.id) ?? null;
+    // Sale is saved: clear the order so Back + adding an item cannot re-submit it as a new sale.
+    ui.cart = []; ui.selectedPayment = null; ui.cashReceived = null; ui.paymentReference = null;
     persistPosState();
     navigateStaff("success");
     if (ui.completedSale && getAutoPrint()) {
@@ -1487,7 +1499,7 @@ function openDialog(options: DialogOptions): void {
   document.querySelector<HTMLFormElement>("#dialog-form")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = event.currentTarget as HTMLFormElement;
     const submit = form.querySelector<HTMLButtonElement>('[type="submit"]');
-    if (!submit) return;
+    if (!submit || submit.disabled) return;
     setDialogError(""); setButtonBusy(submit, true, "Saving");
     try { await options.onSubmit(form); }
     catch (error) { setDialogError(errorMessage(error)); setButtonBusy(submit, false, options.submitLabel); }
@@ -1513,7 +1525,7 @@ function setDialogError(message: string): void {
 }
 
 async function completeMutation(message: string): Promise<void> {
-  closeDialog(); await refreshAll(false); ui.report = null; render(); toast(message, "success");
+  closeDialog(); await refreshAll(false); ui.report = null; ui.inventoryReport = null; render(); toast(message, "success");
 }
 
 function bindPasswordForm(selector: string): void {
@@ -1573,7 +1585,7 @@ function openStockDialog(id?: string): void {
   openDialog({
     title: movement ? "Edit delivery quantity" : "Add raw material stock",
     description: movement ? "Correct this delivery's total quantity. Only the difference changes on-hand stock; previous sales stay deducted." : "Enter the delivery quantity and its unit. Purchase cost is recorded separately; sales deduct ingredients from on-hand stock.",
-    body: `<label class="field"><span>Raw material</span><select name="productId" ${movement ? "disabled" : ""}>${materials.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>${movement ? "Corrected delivery quantity" : "Delivery quantity"}</span><input name="quantity" type="number" min="0.001" step="0.001" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Delivery unit</span><select name="deliveryUnit"></select></label><label class="field"><span>Total purchase cost (PHP)</span><input name="totalCost" type="number" min="0.01" step="0.01" value="${movement?.totalCost ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label><p class="stock-readonly wide" id="stock-delivery-preview" role="status"></p></div>`,
+    body: `<label class="field"><span>Raw material</span><select name="productId" ${movement ? "disabled" : ""}>${materials.map((product) => `<option value="${product.id}" ${movement?.productId === product.id ? "selected" : ""}>${escapeHtml(product.name)} · ${number.format(product.currentStock)} ${escapeHtml(product.unit)}</option>`).join("")}</select></label><div class="form-grid"><label class="field"><span>${movement ? "Corrected delivery quantity" : "Delivery quantity"}</span><input name="quantity" type="text" inputmode="decimal" autocomplete="off" value="${movement?.quantity ?? ""}" required /></label><label class="field"><span>Delivery unit</span><select name="deliveryUnit"></select></label><label class="field"><span>Total purchase cost (PHP)</span><input name="totalCost" type="number" min="0.01" step="0.01" value="${movement?.totalCost ?? ""}" required /></label><label class="field"><span>Date</span><input name="date" type="date" value="${movement?.date ?? manilaDate()}" required /></label><label class="field wide"><span>Note</span><input name="note" maxlength="160" value="${escapeHtml(movement?.note ?? "")}" placeholder="Supplier delivery or reference" /></label><p class="stock-readonly wide" id="stock-delivery-preview" role="status"></p></div>`,
     submitLabel: movement ? "Save changes" : "Add stock",
     onOpen: () => {
       const form = document.querySelector<HTMLFormElement>("#dialog-form")!;
@@ -1585,7 +1597,6 @@ function openStockDialog(id?: string): void {
         const product = material(); if (!product) return;
         const choice = stockUnits(product.unit).find((entry) => entry.unit === units.value);
         if (!choice) return;
-        quantity.step = quantity.min = String(.001 / choice.factor);
         let text = `Inventory unit: ${product.unit}. On hand now: ${number.format(product.currentStock)} ${product.unit}.`;
         try {
           const added = stockQuantity(quantity.value, choice.factor);
@@ -1602,8 +1613,17 @@ function openStockDialog(id?: string): void {
         units.innerHTML = stockUnits(product.unit).map((choice) => `<option value="${escapeHtml(choice.unit)}">${escapeHtml(choice.unit)}</option>`).join("");
         preview();
       };
-      productSelect.addEventListener("change", () => { quantity.value = ""; updateUnits(); });
-      units.addEventListener("change", preview); quantity.addEventListener("input", preview); updateUnits();
+      productSelect.addEventListener("change", () => { quantity.value = ""; unitFactor = 1; updateUnits(); });
+      let unitFactor = 1;
+      units.addEventListener("change", () => {
+        const product = material(); const next = product && stockUnits(product.unit).find((entry) => entry.unit === units.value);
+        const typed = Number(quantity.value.replace(/,/g, ""));
+        // Keep the same physical amount: 5000 g becomes 5 kg, not 5000 kg.
+        if (next && quantity.value.trim() && Number.isFinite(typed)) quantity.value = String(Math.round(typed * unitFactor / next.factor * 1e6) / 1e6);
+        if (next) unitFactor = next.factor;
+        preview();
+      });
+      quantity.addEventListener("input", preview); updateUnits();
     },
     onSubmit: async (form) => {
       if (!form.reportValidity()) throw new Error("Check the delivery quantity, unit, purchase cost and date.");
@@ -1757,7 +1777,7 @@ window.addEventListener("popstate", () => {
   }
   restoreLocationState();
   syncLocation(true);
-  if (ui.session?.role === "admin" && ui.route === "reports" && !ui.report) void loadReport();
+  if (ui.session?.role === "admin" && ui.route === "reports" && !currentReport()) void loadReport();
   else render();
 });
 
