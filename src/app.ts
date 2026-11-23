@@ -10,7 +10,7 @@ import {
   Tag, Trash2, Truck, Upload, UserRound, WalletCards, X, createIcons, type Icons,
 } from "lucide";
 import {
-  api, type AppData, type CashShift, type Category, type InventoryReport, type NotificationItem, type PaymentMethod, type Product,
+  api, LEDGER_LIMIT, type AppData, type CashShift, type Category, type InventoryReport, type NotificationItem, type PaymentMethod, type Product,
   type ReportSummary, type Sale, type SaleStatus, type UserRole,
   type UserSession, type DigitalPaymentMethod, type PaymentQrSettings,
 } from "./api";
@@ -76,9 +76,10 @@ interface UiState {
   productSearch: string;
   posSearch: string;
   posCategory: string;
+  ledgerProduct: string;
 }
 
-const emptyData = (): AppData => ({ categories: [], products: [], stockMovements: [], sales: [], cashShifts: [], cashMovements: [], ingredientUsage: [] });
+const emptyData = (): AppData => ({ categories: [], products: [], stockMovements: [], sales: [], cashShifts: [], cashMovements: [], ingredientUsage: [], stockLedger: null });
 
 function manilaDate(offsetDays = 0): string {
   const date = new Date(Date.now() + offsetDays * 86_400_000);
@@ -118,6 +119,7 @@ const ui: UiState = {
   productSearch: "",
   posSearch: "",
   posCategory: "all",
+  ledgerProduct: "all",
 };
 
 const app = required<HTMLDivElement>("#app");
@@ -239,6 +241,16 @@ function avatarMarkup(session: UserSession, className = "avatar-circle"): string
 
 function rawMaterials(): Product[] {
   return ui.data.products.filter((product) => product.type === "raw_material");
+}
+
+function lowStockCount(): number {
+  return rawMaterials().filter((product) => stockStatus(product) !== "Available").length;
+}
+
+// Red dot beside Inventory while any raw material is low, independent of read notifications.
+function lowStockDot(): string {
+  const count = lowStockCount();
+  return count ? `<i class="nav-alert-dot" role="img" aria-label="${count} low-stock item${count === 1 ? "" : "s"}"></i>` : "";
 }
 
 function finishedProducts(): Product[] {
@@ -369,7 +381,10 @@ async function bootstrap(): Promise<void> {
 }
 
 async function refreshAll(shouldRender = true): Promise<void> {
-  if (!refreshPromise) {
+  // An in-flight refresh may have read data before the caller's save committed;
+  // wait for it, then fetch again so saved stock never shows the old balance.
+  while (refreshPromise) await refreshPromise.catch(() => undefined);
+  {
     refreshPromise = Promise.all([api.appData(), api.notifications(), api.paymentQrSettings().then((images) => ({ images, error: null as string | null })).catch((error: unknown) => ({ images: { GCash: null, Maya: null }, error: errorMessage(error) }))]).then(([data, notificationData, qr]) => {
       ui.data = data;
       ui.paymentQr = qr.images;
@@ -547,7 +562,7 @@ function renderAdmin(): void {
 }
 
 function adminNav(route: AdminRoute, iconName: string, label: string): string {
-  return `<button data-route="${route}" class="${ui.route === route ? "active" : ""}" ${ui.route === route ? 'aria-current="page"' : ""}>${icon(iconName)}<span>${label}</span></button>`;
+  return `<button data-route="${route}" class="${ui.route === route ? "active" : ""}" ${ui.route === route ? 'aria-current="page"' : ""}>${icon(iconName)}<span>${label}</span>${route === "inventory" ? lowStockDot() : ""}</button>`;
 }
 
 function adminTitle(): string {
@@ -578,7 +593,7 @@ function renderDashboard(): string {
   const alerts = rawMaterials().filter((product) => stockStatus(product) !== "Available");
   return `<section class="page-section">
     ${pageHeading("Live operations", "Business at a glance", "Real-time data from Supabase")}
-    <div class="metric-grid">${metric("Total sales", money.format(total), "Selected 7-day period", "BarChart3", "accent")}${metric("Transactions", String(completed.length), "Completed orders", "Receipt")}${metric("Stock alerts", String(alerts.length), alerts.length ? "Needs attention" : "Inventory healthy", "CircleAlert", alerts.length ? "warning" : "success")}${metric("Products", String(ui.data.products.length), "Active catalog items", "Box")}</div>
+    <div class="metric-grid">${metric("Total sales", money.format(total), `${formatDate(ui.reportRange.from)} – ${formatDate(ui.reportRange.to)}`, "BarChart3", "accent")}${metric("Transactions", String(completed.length), "Completed orders", "Receipt")}${metric("Stock alerts", String(alerts.length), alerts.length ? "Needs attention" : "Inventory healthy", "CircleAlert", alerts.length ? "warning" : "success")}${metric("Products", String(ui.data.products.length), "Active catalog items", "Box")}</div>
     <div class="dashboard-grid">
       <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Recent activity</p><h3>Latest sales</h3></div><button class="text-button" data-route="sales">View all</button></div>${salesTable(ui.data.sales.slice(0, 5), true)}</article>
       <article class="panel"><div class="panel-heading"><div><p class="eyebrow">Inventory</p><h3>Stock requiring attention</h3></div><button class="text-button" data-route="inventory">Manage</button></div><div class="alert-list">${alerts.length ? alerts.slice(0, 6).map((product) => `<button data-route="inventory"><span class="mini-product">${productVisual(product)}</span><div><strong>${escapeHtml(product.name)}</strong><small>${number.format(product.currentStock)} ${escapeHtml(product.unit)} remaining</small></div>${statusPill(stockStatus(product))}</button>`).join("") : emptyState("CircleCheck", "Inventory is healthy", "No products are below their threshold.")}</div></article>
@@ -617,7 +632,22 @@ function categoryCard(category: Category): string {
 function renderInventory(): string {
   const materials = rawMaterials();
   const movements = ui.data.stockMovements.filter((movement) => materials.some((product) => product.id === movement.productId));
-  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Delivery quantities stay in history. On hand now includes all deliveries, sales deductions and refunds.", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel valuation-table"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Current value</th><th>Action</th></tr></thead><tbody>${materials.map((product) => `<tr><td data-label="Material"><strong>${escapeHtml(product.name)}</strong></td><td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Average cost">${product.costInitialized ? `${money.format(product.averageUnitCost)} / ${escapeHtml(product.unit)}` : "Uncosted"}</td><td data-label="Current value">${product.costInitialized ? money.format(product.currentStock * product.averageUnitCost) : "Excluded"}</td><td data-label="Action">${product.costInitialized ? "—" : product.currentStock > 0 ? `<button class="small-button" data-action="set-cost-baseline" data-id="${product.id}">Set starting cost</button>` : "Add costed stock"}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Purchase cost</th><th>On hand now</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Purchase cost">${movement.totalCost === null ? "Uncosted legacy entry" : money.format(movement.totalCost)}</td><td data-label="On hand now">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="7">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article></section>`;
+  return `<section class="page-section">${pageHeading("Stock control", "Raw material inventory", "Delivery quantities stay in history. On hand now includes all deliveries, sales deductions and refunds.", `<button class="button primary" data-action="add-stock" ${materials.length ? "" : "disabled"}>${icon("Plus")} Add stock</button>`)}<article class="table-panel valuation-table"><div class="table-scroll"><table><thead><tr><th>Material</th><th>On hand</th><th>Average cost</th><th>Current value</th><th>Action</th></tr></thead><tbody>${materials.map((product) => `<tr><td data-label="Material"><strong>${escapeHtml(product.name)}</strong></td><td data-label="On hand">${number.format(product.currentStock)} ${escapeHtml(product.unit)}</td><td data-label="Average cost">${product.costInitialized ? `${money.format(product.averageUnitCost)} / ${escapeHtml(product.unit)}` : "Uncosted"}</td><td data-label="Current value">${product.costInitialized ? money.format(product.currentStock * product.averageUnitCost) : "Excluded"}</td><td data-label="Action">${product.costInitialized ? "—" : product.currentStock > 0 ? `<button class="small-button" data-action="set-cost-baseline" data-id="${product.id}">Set starting cost</button>` : "Add costed stock"}</td></tr>`).join("")}</tbody></table></div></article><article class="table-panel"><div class="table-scroll"><table><thead><tr><th>Raw material</th><th>Date</th><th>Quantity added</th><th>Purchase cost</th><th>On hand now</th><th>Note</th><th>Actions</th></tr></thead><tbody>${movements.length ? movements.map((movement) => { const product = materials.find((item) => item.id === movement.productId); return `<tr><td data-label="Raw material"><strong>${escapeHtml(product?.name ?? "Deleted raw material")}</strong></td><td data-label="Date">${formatDate(movement.date)}</td><td data-label="Quantity">+${number.format(movement.quantity)} ${escapeHtml(product?.unit ?? "")}</td><td data-label="Purchase cost">${movement.totalCost === null ? "Uncosted legacy entry" : money.format(movement.totalCost)}</td><td data-label="On hand now">${product ? `${number.format(product.currentStock)} ${escapeHtml(product.unit)}` : "—"}</td><td data-label="Note">${escapeHtml(movement.note || "—")}</td><td data-label="Actions"><div class="row-actions"><button class="small-button" data-action="edit-stock" data-id="${movement.id}">Edit</button><button class="small-button danger" data-action="delete-stock" data-id="${movement.id}">Delete</button></div></td></tr>`; }).join("") : `<tr><td colspan="7">${emptyState("Truck", "No stock movements", "Add a raw material and record the first delivery.")}</td></tr>`}</tbody></table></div></article>${stockHistoryPanel(materials)}</section>`;
+}
+
+function stockHistoryPanel(materials: Product[]): string {
+  const ledger = ui.data.stockLedger;
+  const heading = `<div class="panel-heading"><div><p class="eyebrow">Transparency</p><h3>Stock in / out history</h3><span>Every delivery, edit, deletion, sale and refund with the balance after it.</span></div>${ledger ? `<label class="ledger-filter"><span>Material</span><select id="ledger-material"><option value="all">All materials</option>${materials.map((product) => `<option value="${product.id}" ${ui.ledgerProduct === product.id ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></label>` : ""}</div>`;
+  if (!ledger) return `<article class="table-panel">${heading}${emptyState("Truck", "History is not enabled yet", "Apply database migration 013_stock_ledger.sql to start recording stock history.")}</article>`;
+  const byId = new Map(materials.map((product) => [product.id, product]));
+  const rows = ledger.filter((entry) => byId.has(entry.productId) && (ui.ledgerProduct === "all" || entry.productId === ui.ledgerProduct));
+  const body = rows.length ? rows.map((entry) => {
+    const product = byId.get(entry.productId)!;
+    const unit = escapeHtml(product.unit);
+    return `<tr><td data-label="When">${escapeHtml(formatDateTime(entry.createdAt))}</td><td data-label="Material"><strong>${escapeHtml(product.name)}</strong></td><td data-label="Type">${escapeHtml(entry.kind)}${entry.reconstructed ? "<small> (from earlier records)</small>" : ""}</td><td data-label="In / out" class="${entry.change < 0 ? "ledger-out" : "ledger-in"}">${entry.change > 0 ? "+" : "−"}${number.format(Math.abs(entry.change))} ${unit}</td><td data-label="Balance after"><strong>${number.format(entry.balanceAfter)} ${unit}</strong></td><td data-label="Reference">${escapeHtml(entry.reference || "—")}</td><td data-label="By">${escapeHtml(entry.actorName || "—")}</td></tr>`;
+  }).join("") : `<tr><td colspan="7">${emptyState("Truck", "No stock changes yet", "Deliveries and sales will appear here.")}</td></tr>`;
+  const capped = ledger.length >= LEDGER_LIMIT ? `<p class="ledger-note">Showing the latest ${number.format(LEDGER_LIMIT)} changes.</p>` : "";
+  return `<article class="table-panel">${heading}<div class="table-scroll"><table><thead><tr><th>When</th><th>Material</th><th>Type</th><th>In / out</th><th>Balance after</th><th>Reference</th><th>By</th></tr></thead><tbody>${body}</tbody></table></div>${capped}</article>`;
 }
 
 function shiftStatusPill(shift: CashShift): string { return statusPill(shift.status); }
@@ -782,6 +812,7 @@ function bindFilters(): void {
     row.hidden = !(row.dataset.search ?? "").includes(salesSearch?.value.toLowerCase() ?? "") || (!!salesStatus && salesStatus.value !== "all" && row.dataset.status !== salesStatus.value);
   });
   salesSearch?.addEventListener("input", apply); salesStatus?.addEventListener("change", apply);
+  document.querySelector<HTMLSelectElement>("#ledger-material")?.addEventListener("change", (event) => { ui.ledgerProduct = (event.currentTarget as HTMLSelectElement).value; renderAdmin(); });
 }
 
 async function loadReport(): Promise<void> {
@@ -804,7 +835,7 @@ function renderStaff(): void {
 }
 
 function staffBottomNav(): string {
-  const item = (view: StaffView, iconName: string, label: string) => `<button data-staff-view="${view}" class="${ui.staffView === view ? "active" : ""}" ${ui.staffView === view ? 'aria-current="page"' : ""}>${icon(iconName)}<span>${label}</span></button>`;
+  const item = (view: StaffView, iconName: string, label: string) => `<button data-staff-view="${view}" class="${ui.staffView === view ? "active" : ""}" ${ui.staffView === view ? 'aria-current="page"' : ""}>${icon(iconName)}<span>${label}</span>${view === "inventory" ? lowStockDot() : ""}</button>`;
   return `<nav class="staff-nav" aria-label="Staff navigation">${item("dashboard", "LayoutDashboard", "Home")}${item("orders", "Receipt", "Orders")}${item("products", "Coffee", "Products")}${item("cash", "WalletCards", "Cash")}${item("inventory", "Box", "Inventory")}${item("account", "UserRound", "Account")}</nav>`;
 }
 
@@ -823,7 +854,7 @@ function renderStaffView(): string {
 function renderStaffDashboard(): string {
   const todaySales = ui.data.sales.filter((sale) => sale.date === manilaDate() && sale.status === "Completed");
   const alerts = rawMaterials().filter((product) => stockStatus(product) !== "Available");
-  return `<div class="staff-screen"><div class="staff-heading"><p>${formatDate(manilaDate())}</p><h1>Today’s overview</h1></div><div class="staff-metrics">${metric("Sales today", money.format(todaySales.reduce((sum, sale) => sum + saleTotal(sale), 0)), "Completed revenue", "BarChart3")}${metric("Transactions", String(todaySales.length), "Completed today", "Receipt")}${metric("Low stock", String(alerts.length), "Items need attention", "CircleAlert", alerts.length ? "warning" : "success")}</div><h2 class="section-title">Quick actions</h2><div class="staff-quick"><button data-staff-view="products">${icon("Plus")}<strong>New order</strong></button><button data-staff-view="orders">${icon("Receipt")}<strong>Orders</strong></button><button data-staff-view="inventory">${icon("Box")}<strong>Inventory</strong></button></div>${ui.data.products.length ? "" : `<div class="staff-empty-note">${icon("CircleAlert")}<div><strong>The catalog is empty</strong><p>An administrator must create categories and products before orders can be taken.</p></div></div>`}</div>`;
+  return `<div class="staff-screen"><div class="staff-heading"><p>${formatDate(manilaDate())}</p><h1>Today’s overview</h1></div><div class="staff-metrics">${metric("Sales today", money.format(todaySales.reduce((sum, sale) => sum + saleTotal(sale), 0)), "All cashiers · all payments", "BarChart3")}${metric("Transactions", String(todaySales.length), "All cashiers", "Receipt")}${metric("Low stock", String(alerts.length), "Items need attention", "CircleAlert", alerts.length ? "warning" : "success")}</div><h2 class="section-title">Quick actions</h2><div class="staff-quick"><button data-staff-view="products">${icon("Plus")}<strong>New order</strong></button><button data-staff-view="orders">${icon("Receipt")}<strong>Orders</strong></button><button data-staff-view="inventory">${icon("Box")}<strong>Inventory</strong></button></div>${ui.data.products.length ? "" : `<div class="staff-empty-note">${icon("CircleAlert")}<div><strong>The catalog is empty</strong><p>An administrator must create categories and products before orders can be taken.</p></div></div>`}</div>`;
 }
 
 function currentCashShift(): CashShift | null {
@@ -834,7 +865,7 @@ function renderStaffCash(): string {
   const shift = currentCashShift();
   if (!shift) return `<div class="staff-screen cash-screen"><div class="staff-heading"><p>Cash drawer</p><h1>Open cashier shift</h1></div><article class="panel cash-gate">${icon("WalletCards")}<h2>No open shift</h2><p>Enter the starting drawer balance before accepting any POS payment.</p><button class="button primary" data-action="open-shift">Open shift</button></article></div>`;
   const movements = ui.data.cashMovements.filter((movement) => movement.shiftId === shift.id);
-  return `<div class="staff-screen cash-screen"><div class="staff-heading row"><div><p>Opened ${escapeHtml(formatDateTime(shift.openedAt))}</p><h1>Cash drawer</h1></div>${statusPill("Open")}</div><div class="staff-metrics cash-metrics">${metric("Expected cash", money.format(shift.expectedCash), "Current drawer", "WalletCards", "accent")}${metric("Cash sales", money.format(shift.cashSales), "Completed cash orders", "Receipt")}${metric("Digital sales", money.format(shift.digitalSales), "GCash and Maya", "WalletCards")}</div><article class="panel cash-summary"><div class="report-line"><span>Opening balance</span><strong>${money.format(shift.openingBalance)}</strong></div><div class="report-line"><span>Cash in</span><strong>${money.format(shift.cashIn)}</strong></div><div class="report-line"><span>Cash out</span><strong>−${money.format(shift.cashOut)}</strong></div><div class="cash-actions"><button class="button secondary" data-action="cash-movement" data-type="Cash In">Cash in</button><button class="button secondary" data-action="cash-movement" data-type="Cash Out">Cash out</button><button class="button primary" data-action="close-shift">Close shift</button></div></article><h2 class="section-title">Drawer activity</h2><div class="mobile-order-list">${movements.length ? movements.map((movement) => `<article><div><strong>${escapeHtml(movement.type)}</strong><small>${escapeHtml(movement.reason)} · ${escapeHtml(formatDateTime(movement.createdAt))}</small></div><span>${movement.type === "Cash Out" ? "−" : "+"}${money.format(movement.amount)}</span></article>`).join("") : emptyState("WalletCards", "No cash movements", "Cash-in and cash-out entries will appear here.")}</div></div>`;
+  return `<div class="staff-screen cash-screen"><div class="staff-heading row"><div><p>Opened ${escapeHtml(formatDateTime(shift.openedAt))}</p><h1>Cash drawer</h1></div>${statusPill("Open")}</div><div class="staff-metrics cash-metrics">${metric("Expected cash", money.format(shift.expectedCash), "Current drawer", "WalletCards", "accent")}${metric("Cash sales", money.format(shift.cashSales), "This shift · cash only", "Receipt")}${metric("Digital sales", money.format(shift.digitalSales), "This shift · GCash and Maya", "WalletCards")}</div><article class="panel cash-summary"><div class="report-line"><span>Opening balance</span><strong>${money.format(shift.openingBalance)}</strong></div><div class="report-line"><span>Cash in</span><strong>${money.format(shift.cashIn)}</strong></div><div class="report-line"><span>Cash out</span><strong>−${money.format(shift.cashOut)}</strong></div><div class="cash-actions"><button class="button secondary" data-action="cash-movement" data-type="Cash In">Cash in</button><button class="button secondary" data-action="cash-movement" data-type="Cash Out">Cash out</button><button class="button primary" data-action="close-shift">Close shift</button></div></article><h2 class="section-title">Drawer activity</h2><div class="mobile-order-list">${movements.length ? movements.map((movement) => `<article><div><strong>${escapeHtml(movement.type)}</strong><small>${escapeHtml(movement.reason)} · ${escapeHtml(formatDateTime(movement.createdAt))}</small></div><span>${movement.type === "Cash Out" ? "−" : "+"}${money.format(movement.amount)}</span></article>`).join("") : emptyState("WalletCards", "No cash movements", "Cash-in and cash-out entries will appear here.")}</div></div>`;
 }
 
 function renderStaffProducts(): string {

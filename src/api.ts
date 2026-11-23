@@ -19,7 +19,9 @@ export interface Sale { id: string; receipt: string; date: string; payment: Paym
 export interface CashMovement { id: string; shiftId: string; type: "Cash In" | "Cash Out"; amount: number; reason: string; createdAt: string }
 export interface CashShift { id: string; openedBy: string; cashierName: string; status: "Open" | "Closed"; openingBalance: number; openedAt: string; closedAt: string | null; countedCash: number | null; expectedCash: number; variance: number | null; closingNote: string; cashSales: number; digitalSales: number; cashIn: number; cashOut: number }
 export interface IngredientUsage { saleId: string; ingredientId: string; ingredientName: string; quantity: number; unit: string }
-export interface AppData { categories: Category[]; products: Product[]; stockMovements: StockMovement[]; sales: Sale[]; cashShifts: CashShift[]; cashMovements: CashMovement[]; ingredientUsage: IngredientUsage[] }
+export type StockLedgerKind = "Opening balance" | "Delivery" | "Delivery edit" | "Delivery deleted" | "Sale" | "Order cancelled" | "Order restored" | "Adjustment";
+export interface StockLedgerEntry { id: number; productId: string; change: number; balanceAfter: number; kind: StockLedgerKind; reference: string; actorName: string; reconstructed: boolean; createdAt: string }
+export interface AppData { categories: Category[]; products: Product[]; stockMovements: StockMovement[]; sales: Sale[]; cashShifts: CashShift[]; cashMovements: CashMovement[]; ingredientUsage: IngredientUsage[]; stockLedger: StockLedgerEntry[] | null }
 export interface NotificationItem { id: string; type: "low_stock" | "out_of_stock"; severity: "warning" | "danger"; title: string; message: string; productId: string; createdAt: string; active: number; isRead: number }
 export interface ReportSummary {
   range: { from: string; to: string };
@@ -53,6 +55,7 @@ interface SaleItemRow { sale_id: string; product_id: string; product_name: strin
 interface NotificationRow { id: string; type: "low_stock" | "out_of_stock"; severity: "warning" | "danger"; title: string; message: string; product_id: string; created_at: string; resolved_at?: string | null; active: boolean }
 interface CashShiftRow { id: string; opened_by: string; cashier_name: string; status: "Open" | "Closed"; opening_balance_centavos: number | string; opened_at: string; closed_at: string | null; counted_cash_centavos: number | string | null; expected_cash_centavos: number | string; variance_centavos: number | string | null; closing_note: string; cash_sales_centavos: number | string; digital_sales_centavos: number | string; cash_in_centavos: number | string; cash_out_centavos: number | string }
 interface CashMovementRow { id: string; shift_id: string; movement_type: "Cash In" | "Cash Out"; amount_centavos: number | string; reason: string; created_at: string }
+interface LedgerRow { id: number; product_id: string; change: number | string; balance_after: number | string; kind: StockLedgerKind; reference: string; actor_name: string; reconstructed: boolean; created_at: string }
 interface UsageRow { sale_id: string; ingredient_id: string; ingredient_name: string; quantity: number | string; unit: string }
 
 function message(error: { message?: string } | null | undefined, fallback = "The request could not be completed."): string {
@@ -99,20 +102,41 @@ async function removeStorageFile(bucket: "product-images" | "avatars", path: str
   if (error) fail(error);
 }
 
+// Supabase returns at most 1,000 rows per request; read every page so totals never undercount.
+// shortcut: stops on a short page, so it assumes the project's API max-rows stays at 1,000 (the Supabase default); change PAGE if that setting changes.
+const PAGE = 1000;
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) fail(error);
+    rows.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
+
+export const LEDGER_LIMIT = 1000;
+async function loadStockLedger(): Promise<StockLedgerEntry[] | null> {
+  const { data, error } = await supabase.from("stock_ledger").select("id, product_id, change, balance_after, kind, reference, actor_name, reconstructed, created_at").order("created_at", { ascending: false }).order("id", { ascending: false }).limit(LEDGER_LIMIT);
+  // null = migration 013 not applied yet; the rest of the app keeps working.
+  if (error) { if (["42P01", "PGRST205"].includes((error as { code?: string }).code ?? "")) return null; fail(error); }
+  return ((data ?? []) as LedgerRow[]).map((row) => ({ id: row.id, productId: row.product_id, change: Number(row.change), balanceAfter: Number(row.balance_after), kind: row.kind, reference: row.reference, actorName: row.actor_name, reconstructed: row.reconstructed, createdAt: row.created_at }));
+}
+
 async function loadAppData(): Promise<AppData> {
-  const [categoryResult, productResult, recipeResult, movementResult, saleResult, itemResult, shiftResult, cashMovementResult, usageResult] = await Promise.all([
+  const [categoryResult, productResult, recipeResult, movementRows, saleRows, itemRows, shiftRows, cashMovementRows, usageRows, stockLedger] = await Promise.all([
     supabase.from("categories").select("id, name").order("name"),
     supabase.from("products").select("id, name, category_id, product_type, tracks_inventory, unit, current_stock, low_stock_threshold, average_unit_cost_centavos, cost_initialized, price_centavos, image_path").eq("active", true).order("name"),
     supabase.from("product_recipes").select("finished_product_id, ingredient_id, quantity").order("created_at"),
-    supabase.from("inventory_movements").select("id, product_id, quantity, movement_date, note, total_cost_centavos, unit_cost_centavos").order("movement_date", { ascending: false }).order("created_at", { ascending: false }),
-    supabase.from("sales").select("id, receipt, business_date, payment_method, status, total_centavos, created_at, created_by, cashier_name, cash_shift_id, cash_received_centavos, change_centavos").order("business_date", { ascending: false }).order("created_at", { ascending: false }),
-    supabase.from("sale_items").select("sale_id, product_id, product_name, quantity, unit_price_centavos, line_total_centavos"),
-    supabase.from("cash_shift_summaries").select("id, opened_by, cashier_name, status, opening_balance_centavos, opened_at, closed_at, counted_cash_centavos, expected_cash_centavos, variance_centavos, closing_note, cash_sales_centavos, digital_sales_centavos, cash_in_centavos, cash_out_centavos").order("opened_at", { ascending: false }).limit(500),
-    supabase.from("cash_movements").select("id, shift_id, movement_type, amount_centavos, reason, created_at").order("created_at", { ascending: false }).limit(1000),
-    supabase.from("sale_ingredient_usage").select("sale_id, ingredient_id, ingredient_name, quantity, unit"),
+    fetchAll<MovementRow>((from, to) => supabase.from("inventory_movements").select("id, product_id, quantity, movement_date, note, total_cost_centavos, unit_cost_centavos").order("movement_date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, to)),
+    fetchAll<SaleRow>((from, to) => supabase.from("sales").select("id, receipt, business_date, payment_method, status, total_centavos, created_at, created_by, cashier_name, cash_shift_id, cash_received_centavos, change_centavos").order("business_date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, to)),
+    fetchAll<SaleItemRow>((from, to) => supabase.from("sale_items").select("sale_id, product_id, product_name, quantity, unit_price_centavos, line_total_centavos").order("id").range(from, to)),
+    fetchAll<CashShiftRow>((from, to) => supabase.from("cash_shift_summaries").select("id, opened_by, cashier_name, status, opening_balance_centavos, opened_at, closed_at, counted_cash_centavos, expected_cash_centavos, variance_centavos, closing_note, cash_sales_centavos, digital_sales_centavos, cash_in_centavos, cash_out_centavos").order("opened_at", { ascending: false }).order("id").range(from, to)),
+    fetchAll<CashMovementRow>((from, to) => supabase.from("cash_movements").select("id, shift_id, movement_type, amount_centavos, reason, created_at").order("created_at", { ascending: false }).order("id").range(from, to)),
+    fetchAll<UsageRow>((from, to) => supabase.from("sale_ingredient_usage").select("sale_id, ingredient_id, ingredient_name, quantity, unit").order("sale_id").order("ingredient_id").range(from, to)),
+    loadStockLedger(),
   ]);
-  for (const result of [categoryResult, productResult, recipeResult, movementResult, saleResult, itemResult, shiftResult, cashMovementResult, usageResult]) if (result.error) fail(result.error);
-  const itemRows = (itemResult.data ?? []) as SaleItemRow[];
+  for (const result of [categoryResult, productResult, recipeResult]) if (result.error) fail(result.error);
   const itemsBySale = new Map<string, SaleItem[]>();
   for (const row of itemRows) {
     const item = { productId: row.product_id, name: row.product_name, quantity: row.quantity, unitPrice: Number(row.unit_price_centavos) / 100 };
@@ -152,17 +176,17 @@ async function loadAppData(): Promise<AppData> {
             })))
           : 0;
   }
-  const sales: Sale[] = ((saleResult.data ?? []) as SaleRow[]).map((row) => ({
+  const sales: Sale[] = saleRows.map((row) => ({
     id: row.id, receipt: row.receipt, date: row.business_date, payment: row.payment_method, status: row.status,
     total: Number(row.total_centavos) / 100, items: itemsBySale.get(row.id) ?? [], createdAt: row.created_at, createdBy: row.created_by,
     cashierName: row.cashier_name ?? "Unknown cashier", cashShiftId: row.cash_shift_id,
     cashReceived: row.cash_received_centavos === null ? null : Number(row.cash_received_centavos) / 100,
     change: row.change_centavos === null ? null : Number(row.change_centavos) / 100,
   }));
-  const cashMovements: CashMovement[] = ((cashMovementResult.data ?? []) as CashMovementRow[]).map((row) => ({
+  const cashMovements: CashMovement[] = cashMovementRows.map((row) => ({
     id: row.id, shiftId: row.shift_id, type: row.movement_type, amount: Number(row.amount_centavos) / 100, reason: row.reason, createdAt: row.created_at,
   }));
-  const shifts: CashShift[] = ((shiftResult.data ?? []) as CashShiftRow[]).map((row) => {
+  const shifts: CashShift[] = shiftRows.map((row) => {
     const cashSales = Number(row.cash_sales_centavos) / 100;
     const digitalSales = Number(row.digital_sales_centavos) / 100;
     const cashIn = Number(row.cash_in_centavos) / 100;
@@ -179,11 +203,12 @@ async function loadAppData(): Promise<AppData> {
   return {
     categories: ((categoryResult.data ?? []) as Category[]),
     products,
-    stockMovements: ((movementResult.data ?? []) as MovementRow[]).map((row) => ({ id: row.id, productId: row.product_id, quantity: Number(row.quantity), date: row.movement_date, note: row.note, totalCost: row.total_cost_centavos === null ? null : Number(row.total_cost_centavos) / 100, unitCost: row.unit_cost_centavos === null ? null : Number(row.unit_cost_centavos) / 100 })),
+    stockMovements: movementRows.map((row) => ({ id: row.id, productId: row.product_id, quantity: Number(row.quantity), date: row.movement_date, note: row.note, totalCost: row.total_cost_centavos === null ? null : Number(row.total_cost_centavos) / 100, unitCost: row.unit_cost_centavos === null ? null : Number(row.unit_cost_centavos) / 100 })),
     sales,
     cashShifts: shifts,
     cashMovements,
-    ingredientUsage: ((usageResult.data ?? []) as UsageRow[]).map((row) => ({ saleId: row.sale_id, ingredientId: row.ingredient_id, ingredientName: row.ingredient_name, quantity: Number(row.quantity), unit: row.unit })),
+    ingredientUsage: usageRows.map((row) => ({ saleId: row.sale_id, ingredientId: row.ingredient_id, ingredientName: row.ingredient_name, quantity: Number(row.quantity), unit: row.unit })),
+    stockLedger,
   };
 }
 
@@ -289,9 +314,8 @@ async function buildInventoryReport(from: string, to: string): Promise<Inventory
   if (from > to) throw new Error("Start date must be on or before end date.");
   const [data, alertResult] = await Promise.all([
     loadAppData(),
-    supabase.from("notifications").select("type, severity, product_id, created_at, resolved_at").gte("created_at", `${from}T00:00:00+08:00`).lte("created_at", `${to}T23:59:59+08:00`).order("created_at", { ascending: false }),
+    fetchAll<{ type: string; severity: string; product_id: string; created_at: string; resolved_at: string | null }>((start, end) => supabase.from("notifications").select("id, type, severity, product_id, created_at, resolved_at").gte("created_at", `${from}T00:00:00+08:00`).lte("created_at", `${to}T23:59:59+08:00`).order("created_at", { ascending: false }).order("id").range(start, end)),
   ]);
-  if (alertResult.error) fail(alertResult.error);
   const materials = data.products.filter((product) => product.type === "raw_material");
   const stock = materials.map((product) => ({
     name: product.name, unit: product.unit, quantity: product.currentStock,
@@ -307,7 +331,7 @@ async function buildInventoryReport(from: string, to: string): Promise<Inventory
     current.quantity += usage.quantity; usageMap.set(usage.ingredientId, current);
   });
   const productById = new Map(materials.map((product) => [product.id, product]));
-  const alerts = ((alertResult.data ?? []) as Array<{ type: string; severity: string; product_id: string; created_at: string; resolved_at: string | null }>).map((row) => ({
+  const alerts = alertResult.map((row) => ({
     createdAt: row.created_at, resolvedAt: row.resolved_at, name: productById.get(row.product_id)?.name ?? "Deleted material", type: row.type, severity: row.severity,
   }));
   return {
