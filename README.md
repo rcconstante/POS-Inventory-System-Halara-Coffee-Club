@@ -1,95 +1,207 @@
-# Halara Coffee Club POS and Inventory
+# Halara Coffee Club — POS & Inventory System
 
-A responsive thesis point-of-sale, inventory, notification, and reporting
-application. The frontend is plain TypeScript/JavaScript, HTML, and CSS. Supabase
-provides authentication, PostgreSQL data, row-level security, transactional
-operations, and image storage.
+A full-stack Point of Sale (POS), recipe-driven inventory, cash-shift reconciliation, and reporting system built for **Halara Coffee Club**.
 
-## Supabase setup
+It combines a responsive TypeScript/HTML/CSS web application (installable as a PWA), an optional Android tablet WebView wrapper with native Bluetooth thermal receipt printing, and a Supabase PostgreSQL backend enforcing row-level security, transactional stock deduction, and real-time workspace synchronization.
 
-1. Open the Supabase SQL Editor for the project.
-2. Run the SQL files in `supabase/migrations` in numeric order. Existing
-   installations should apply every newer numbered migration they have not yet
-   run, through `011_maya_payment_qr.sql`.
-3. In **Authentication → Users**, create:
-   - `r.constante.dev@gmail.com` with password `Admin@12345!`
-   - `staff@halara.test` with password `Staff@12345!`
-4. Return to the SQL Editor and run `supabase/setup-users.sql`.
+---
 
-The first SQL file creates the application tables, indexes, storage buckets,
-row-level security policies, notification triggers, and transactional stock and
-sales functions. Migration `002_product_recipes.sql` separates raw materials
-from finished POS items, adds per-serving recipes, and deducts all recipe
-ingredients atomically when a sale is completed. `setup-users.sql` assigns the
-Admin and Staff roles to the two thesis accounts. Change the default passwords
-from the application after confirming that both accounts can sign in.
+## Table of Contents
 
-After applying migration 002, review the Admin **Products** workspace. Existing
-priced products are classified as finished products and must be given a recipe
-before staff can sell them. Existing zero-price products are classified as raw
-materials. Stock raw materials in their recipe unit (for example, `mL`, `g`, or
-`pcs`) so recipe quantities and on-hand quantities use the same measurement.
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [System Architecture & Diagrams](#system-architecture--diagrams)
+- [Tech Stack & Project Structure](#tech-stack--project-structure)
+- [Supabase Setup & Migrations](#supabase-setup--migrations)
+- [Local Development & Validation](#local-development--validation)
+- [Deployment (Netlify & Keep-Alive)](#deployment-netlify--keep-alive)
+- [Mobile PWA & Thermal Receipt Printing](#mobile-pwa--thermal-receipt-printing)
 
-Migration `003_default_menu.sql` adds the client-provided food, pastry, drink,
-and add-on menu with the listed prices. It intentionally does not add stock
-photos or guessed recipes. Administrators upload the real product photos and
-configure each item's actual recipe from **Products → Finished products** before
-the item becomes available for sale. Migration `004_allow_draft_finished_products.sql`
-allows those photos and menu details to be saved while the recipe is still being
-prepared. Migration `005_inventory_tracking_scope.sql` introduced category-based
-tracking and sale-item snapshots. Migration
-`008_correct_inventory_tracking_scope.sql` applies the client's final
-clarification: only Pastries and Pasta are not tracked; Espresso Based, Not
-Coffee, Tea Refreshers and Soda, Add-ons, and Sandwiches require recipes. The
-tracking decision is snapshotted on every sale item so historical
-cancellation/restoration remains safe when rules change.
+---
 
-Migration `006_cash_reporting_realtime.sql` adds cashier shifts, auditable
-cash-in/cash-out movements, tender and change snapshots, closed-drawer
-reconciliation protection, weighted-average raw-material costing, and Realtime
-publication registration. Every Cash, GCash, and Maya sale now requires the
-staff member to open a shift first. Existing cash transactions are preserved as
-legacy exact-payment sales without a shift. Apply this migration before using
-the updated frontend because the old two-argument `create_sale` RPC is removed.
-Payment submissions use a persisted client reference and a transaction-level
-lock so retries or concurrent double-submissions return the same sale instead of
-deducting inventory twice.
+## Features
 
-Migration `007_fix_create_sale_ambiguous_id.sql` qualifies product identifiers
-inside the payment RPC. Existing databases that already applied migration 006
-must apply migration 007 before processing another POS payment.
+### Admin Workspace
+- **Live Dashboard** — Real-time sales totals, completed transaction counts, low-stock/out-of-stock alerts, and recent receipts.
+- **Catalog & Recipe Management** — Separates sellable finished products from stocked raw materials, with per-serving ingredient recipes and category-based tracking scope (`Pastries` and `Pasta` excluded from stock deduction).
+- **Raw Material Inventory & Stock Ledger** — Unit-safe stock intake (`g` ↔ `kg`, `mL` ↔ `L` conversion), weighted-average unit costing, delivery edits/deletions that preserve sales deductions, and an append-only **Stock In / Out History** ledger with running balances.
+- **Cash Management** — Monitor all open and closed cashier shifts, inspect Cash In/Out movements and variance, or force-close abandoned shifts with an audit note.
+- **Sales & Inventory Reports** — Date-filtered revenue charts, top-selling products, payment breakdowns, stock valuation, ingredient consumption, alert history, and **PDF / CSV exports**.
+- **Digital Payment QR Settings** — Upload, auto-crop, and manage shared **GCash** and **Maya** payment QRs across all devices.
 
-Migration `009_project_keepalive.sql` adds a read-only RPC for the deployed
-Netlify site's scheduled keep-alive. The function returns only the database
-time, is callable with the publishable key, and cannot read or modify business
-data.
+### Staff POS Workspace
+- **Shift-Gated Checkout** — Cashiers open a shift with a starting drawer balance before taking Cash, GCash, or Maya orders.
+- **Live Availability & Atomic Deduction** — Menu availability is computed from raw-material stock; completing an order deducts all shared recipe ingredients atomically and prevents duplicate submissions via idempotent client references.
+- **Cash & Digital Payments** — Quick tender buttons, automatic change calculation, GCash/Maya QR display with manual confirmation, and safe refund/restore controls.
+- **Thermal Receipt Printing** — Dual-copy (Customer + Store) 58mm/80mm receipts via browser print dialog or direct Bluetooth ESC/POS printing in the Android tablet app.
+- **Live Stock Visibility** — Real-time raw material status and low-stock navigation indicators synchronized through Supabase Realtime.
 
-Administrators can assign a one-time starting unit cost to uncosted current
-stock, then record the total purchase cost on every new stock entry. Inventory
-reports clearly exclude uncosted materials from the valued total. Staff can
-close and reconcile only their own drawer; administrators may inspect all
-shifts and force-close an abandoned shift with a required note.
+---
 
-The Admin **Reports** workspace contains separate Sales and Inventory views and
-sectioned PDF/CSV exports. Staff and Admin sales history can preview and reprint
-itemized thermal receipts. Database changes are synchronized through authenticated
-Supabase Realtime channels; the former 30-second notification polling loop is no
-longer used.
+## Screenshots
 
-### Test-only ingredients and recipes
+### Admin Dashboard
 
-For a test or staging database only, run
-`supabase/testing/seed_inventory_recipes.sql` after migrations 001–008. It adds
-deterministic opening stock and recipes for the default coffee and sandwich
-menu. The quantities are testing assumptions—not the client's production
-formulations—and rerunning the file resets the named test materials and recipes.
-It is intentionally outside `supabase/migrations` and must not be included in a
-production migration workflow.
+| Dashboard Overview | Raw Material Inventory & Valuation |
+| :---: | :---: |
+| ![Admin Dashboard](docs/screenshots/admin-dashboard.png) | ![Admin Inventory](docs/screenshots/admin-inventory.png) |
 
-The seed uses the client-mentioned **Oatside Milk** name. Product image paths
-remain empty so the client can upload the actual menu photos in the Admin catalog.
+| Sales & Inventory Reports |
+| :---: |
+| ![Admin Reports](docs/screenshots/admin-reports.png) |
 
-## Local development
+### Staff POS Workspace
+
+| Staff Home — Today's Overview | Staff POS — New Order Menu |
+| :---: | :---: |
+| ![Staff Dashboard](docs/screenshots/staff-dashboard.png) | ![Staff POS Menu](docs/screenshots/staff-pos.png) |
+
+---
+
+## System Architecture & Diagrams
+
+### High-Level Architecture
+
+```mermaid
+flowchart LR
+  subgraph Clients["Client Apps"]
+    WebAdmin["Admin Web Dashboard<br/>(Desktop / Browser)"]
+    WebStaff["Staff Web POS<br/>(Installable PWA)"]
+    AndroidApp["Android Tablet App<br/>(Expo WebView + Native Bluetooth)"]
+  end
+
+  subgraph Hosting["Hosting & Automation"]
+    Netlify["Netlify Static Hosting<br/>(dist/)"]
+    KeepAlive["Scheduled Function<br/>(supabase-keepalive · daily)"]
+  end
+
+  subgraph Supabase["Supabase Backend"]
+    Auth["Supabase Auth<br/>(Admin / Staff Roles + RLS)"]
+    DB[("PostgreSQL<br/>Transactional RPCs & Triggers")]
+    Realtime["Supabase Realtime<br/>(Workspace Sync)"]
+    Storage["Supabase Storage<br/>(Product Photos & Avatars)"]
+  end
+
+  Printer["Bluetooth Thermal Printer<br/>(58mm / 80mm ESC/POS)"]
+
+  WebAdmin --> Netlify
+  WebStaff --> Netlify
+  AndroidApp --> Netlify
+  AndroidApp -->|"ESC/POS Raster"| Printer
+
+  WebAdmin <--> Auth
+  WebStaff <--> Auth
+  AndroidApp <--> Auth
+
+  WebAdmin <-->|"RPC / Queries"| DB
+  WebStaff <-->|"RPC / Queries"| DB
+  AndroidApp <-->|"RPC / Queries"| DB
+
+  DB --> Realtime
+  Realtime -.->|"Live Updates"| WebAdmin
+  Realtime -.->|"Live Updates"| WebStaff
+  Realtime -.->|"Live Updates"| AndroidApp
+
+  WebAdmin <--> Storage
+  KeepAlive -->|"project_keepalive()"| DB
+```
+
+### Atomic Sale & Inventory Deduction Flow
+
+```mermaid
+sequenceDiagram
+  actor Cashier as Staff Cashier
+  participant POS as Staff POS UI
+  participant RPC as Postgres create_sale()
+  participant Inv as products & stock_ledger
+  participant RT as Supabase Realtime
+
+  Cashier->>POS: Add items & confirm payment
+  POS->>RPC: create_sale(payment, items, cash, client_reference)
+  RPC->>RPC: Advisory lock on client_reference (idempotency check)
+  RPC->>RPC: Lock open cash_shift & finished products (FOR UPDATE)
+  RPC->>Inv: Lock & verify all aggregated raw materials (FOR UPDATE)
+  alt Insufficient stock or closed shift
+    RPC-->>POS: Raise exception (full rollback)
+  else All checks pass
+    RPC->>Inv: Insert sales, sale_items, sale_ingredient_usage
+    RPC->>Inv: Deduct current_stock & trigger stock_ledger + alerts
+    RPC-->>POS: Return receipt & saved totals
+    POS->>POS: Clear cart & print receipt (optional auto-print)
+    Inv-->>RT: Broadcast table changes
+    RT-->>POS: Sync balances across Admin & Staff sessions
+  end
+```
+
+---
+
+## Tech Stack & Project Structure
+
+- **Frontend**: TypeScript, Vite, vanilla HTML/CSS, Lucide icons, `jsPDF` (PDF reports), `jsQR` (QR detection & cropping)
+- **Backend**: Supabase (Auth, PostgreSQL RPCs, Triggers, Row-Level Security, Realtime, Storage)
+- **Mobile Wrapper**: Expo / React Native WebView with custom Android Bluetooth thermal printer module (`mobile/`)
+- **Testing**: Node.js built-in test runner (`node --test`) + `@electric-sql/pglite` for isolated PostgreSQL migration & RPC tests
+
+```text
+POS-InventorySystem/
+├── assets/                   # Brand logo, role artwork, payment icons
+├── docs/
+│   ├── screenshots/          # Admin & Staff UI screenshots
+│   ├── inventory-safety.md   # Inventory accuracy & unit-integrity notes
+│   └── payment-qr.md         # GCash & Maya QR architecture notes
+├── mobile/                   # Android tablet WebView + native Bluetooth printer app
+├── netlify/functions/        # Daily Supabase Free Plan keep-alive function
+├── public/                   # PWA manifest, service worker, app icons, print assets
+├── shared/                   # Typed WebView ↔ native printer bridge protocol
+├── src/
+│   ├── api.ts                # Supabase client, paginated queries, reports, exports
+│   ├── app.ts                # Admin dashboard & Staff POS UI
+│   ├── inventory-quantity.ts # Unit conversion & quantity validation helpers
+│   ├── native-pos.ts         # Native Android printer bridge client
+│   ├── payment-qr.ts         # QR detection & white-border auto-cropping
+│   ├── receipt-printing.ts   # Print lifecycle isolation for thermal roll media
+│   └── styles.css            # Application theme & responsive layout
+├── supabase/
+│   ├── migrations/           # Numbered SQL migrations (001–014)
+│   ├── setup-users.sql       # Role assignment for Admin & Staff accounts
+│   └── testing/              # Non-production deterministic test seed
+└── tests/                    # Automated unit, checkout, QR, printer & PGlite SQL tests
+```
+
+---
+
+## Supabase Setup & Migrations
+
+1. Open the **Supabase SQL Editor** for your project.
+2. Run the SQL migrations in `supabase/migrations/` in **numeric order** (existing deployments only need to run migrations newer than what is already applied):
+
+| # | Migration File | Summary |
+| :---: | :--- | :--- |
+| 001 | `001_initial.sql` | Core schema (`profiles`, `categories`, `products`, `inventory_movements`, `sales`, `sale_items`, `notifications`), RLS, storage buckets, base RPCs |
+| 002 | `002_product_recipes.sql` | Separates `raw_material` vs `finished_product`, adds `product_recipes` & `sale_ingredient_usage`, atomic ingredient deduction |
+| 003 | `003_default_menu.sql` | Seeds default Halara Coffee Club categories and menu items (without stock photos or guessed recipes) |
+| 004 | `004_allow_draft_finished_products.sql` | Allows saving finished product details & photos before recipes are configured |
+| 005 | `005_inventory_tracking_scope.sql` | Introduces category-level inventory tracking flag and sale-item tracking snapshots |
+| 006 | `006_cash_reporting_realtime.sql` | Adds cashier shifts, Cash In/Out movements, weighted-average raw-material costing, idempotent `create_sale`, and Realtime publication |
+| 007 | `007_fix_create_sale_ambiguous_id.sql` | Qualifies column identifiers inside `create_sale` RPC |
+| 008 | `008_correct_inventory_tracking_scope.sql` | Final tracking scope: excludes only `Pastries` and `Pasta`; tracks Espresso Based, Not Coffee, Tea Refreshers & Soda, Sandwiches, and Add-ons |
+| 009 | `009_project_keepalive.sql` | Adds read-only `project_keepalive()` RPC for the daily Netlify keep-alive job |
+| 010 | `010_gcash_payment_qr.sql` | Adds `payment_settings` table and admin RPC for shared GCash QR |
+| 011 | `011_maya_payment_qr.sql` | Extends `payment_settings` and adds unified `set_payment_qr()` for GCash and Maya |
+| 012 | `012_preserve_inventory_units.sql` | Trigger preventing unit relabelling (`g` ↔ `kg`, `mL` ↔ `L`) once stock, recipes, or history exist |
+| 013 | `013_stock_ledger.sql` | Creates append-only `stock_ledger` table, triggers, historical reconstruction, RLS, and Realtime publication |
+| 014 | `014_cash_refund_guard.sql` | Locks cash shift row and blocks Cash refunds that would make expected drawer cash negative |
+
+3. In **Authentication → Users**, create the initial accounts (change default passwords after first login):
+   - Admin: `r.constante.dev@gmail.com` / `Admin@12345!`
+   - Staff: `staff@halara.test` / `Staff@12345!`
+4. Run [`supabase/setup-users.sql`](supabase/setup-users.sql) in the SQL Editor to assign `admin` and `staff` roles.
+
+> **Staging / Test Seed Only:** For a non-production test database, you may optionally run [`supabase/testing/seed_inventory_recipes.sql`](supabase/testing/seed_inventory_recipes.sql) after migrations `001`–`008` to load sample ingredients and recipes. Do **not** run it on production.
+
+---
+
+## Local Development & Validation
 
 ```sh
 npm install
@@ -98,109 +210,51 @@ npm run dev
 
 Open `http://127.0.0.1:5173`.
 
-The supplied Supabase project URL and publishable browser key are used as safe
-defaults. To use another project, copy `.env.example` to `.env.local` and set:
+To connect to your own Supabase project, copy `.env.example` to `.env.local` and set:
 
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
-Never place a Supabase service-role key in the frontend or in a `VITE_`
-environment variable.
+> Never put a Supabase `service_role` key in the frontend or any `VITE_` variable.
 
-## Install on a phone home screen
-
-The Staff POS and Admin Inventory workspace are two roles inside the same web
-application. This project is an installable Progressive Web App, not a separate
-Android APK or iOS application.
-
-- On Android Chrome, sign in and use **Add POS to home screen**, or open the
-  browser menu and choose **Install app** / **Add to Home screen**.
-- On iPhone or iPad, open the deployed site in Safari, tap **Share**, then
-  **Add to Home Screen**.
-
-Installation requires an HTTPS deployment (localhost is allowed during
-development). The application shell can reopen from its cache, but authentication,
-sales, and inventory updates still require an internet connection to Supabase.
-The favicon and installed-app icons use the Halara Coffee Club main logo.
-
-### Receipt printing on the Bluetooth tablet
-
-**Print receipt** opens the browser's native print dialog on both desktop and
-Android. Select the Bluetooth printer, keep an available roll size such as
-**58mm Roll (default)**, then confirm **Print**. There is no app-picker, image
-export, or requirement to open RTPrinter System. RTPrinter was provided as a
-working hardware reference, not an integration requirement.
-
-The RP30A-UB label specifies 80mm paper and ESC/POS, while the tablet's selected
-Android print service currently advertises 58mm media. The receipt uses at most
-80mm and fits narrower media selected by the service. It does not require an
-80mm option in that dialog. Android print services supply those options; the
-website cannot add them. See [Android printer capabilities](https://developer.android.com/reference/android/print/PrinterCapabilitiesInfo).
-
-The print document is prepared when a receipt opens and frozen during the print
-lifecycle. Background UI refreshes cannot replace it while Android prepares or
-re-lays out the job. Receipt copies use normal block flow and can paginate on
-short roll sizes. Individual item rows avoid page breaks where possible. The
-viewport's screen height does not impose a minimum printed page height.
-
-The optional checkout auto-print setting requests the same native dialog.
-Confirm Print there; the website cannot silently submit a system print job or
-verify that paper printed. The printer must be paired and available through the
-selected, enabled Android print service. Printing inside another app uses a
-separate path and does not verify Chrome's system print service.
-
-For physical verification: open a saved order's receipt, tap Print receipt,
-select Bluetooth Printer and the offered 58mm roll size, and tap the final Print
-icon. Check both receipt copies, a long order, and cancellation/retry. If preview
-renders but paper does not print, test a simple page from Chrome through the
-same printer destination and inspect Android's print queue. Browser layout and
-PDF checks cannot verify Bluetooth delivery. See [Chrome's Android printing instructions](https://support.google.com/chrome/answer/1069693?hl=en&co=GENIE.Platform%3DAndroid).
-
-For an isolated comparison, open `/print-check.html` on the deployed site and
-print its short 58mm text job through the same Android printer destination. This
-page has no authentication, database calls, product images, or POS rendering.
-Its diagnostics record the browser version and print lifecycle events, without
-claiming those events confirm physical printing. Send the diagnostics with the
-physical result to distinguish receipt-document failures from broader Chrome
-or Android print-service failures.
-
-## Netlify deployment
-
-The repository includes `netlify.toml`. Connect the GitHub repository in
-Netlify and use the detected settings:
-
-- Build command: `npm run build`
-- Publish directory: `dist`
-
-Every push to the production branch triggers a new deployment. Supabase keeps
-the database, authentication records, and uploaded images independently of the
-Netlify build.
-
-### Supabase Free Plan keep-alive
-
-The published Netlify deployment runs `supabase-keepalive` once daily at
-03:17 UTC. It sends one small request to the read-only `project_keepalive` RPC
-so the database receives regular activity even when nobody opens the POS.
-
-Configure these variables in **Netlify → Project configuration → Environment
-variables** before publishing migration 009 and the scheduled function:
-
-```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-```
-
-After the production deploy, open **Netlify → Functions → supabase-keepalive**
-and use **Run now** once. A successful invocation confirms both the environment
-variables and database migration are active. This reduces Free Plan inactivity
-pausing risk, but only a paid Supabase plan guarantees that a production project
-will not be paused.
-
-## Validation
+### Typecheck, Build & Automated Tests
 
 ```sh
 npm run typecheck
 npm run build
+node --test tests/*.test.mjs
 ```
+
+The test suite runs **39 automated tests** covering checkout idempotency, cart clearing, GCash/Maya QR validation & cropping, stock unit conversions, native Bluetooth bridge security, and live SQL execution in PGlite (`add_stock`, `update_stock_entry`, `delete_stock_entry`, `create_sale`, `set_sale_status`, `preserve_inventory_unit`, `stock_ledger`, and cash refund guards).
+
+---
+
+## Deployment (Netlify & Keep-Alive)
+
+The repository includes [`netlify.toml`](netlify.toml) configured for automatic builds:
+
+- **Build command**: `npm run build`
+- **Publish directory**: `dist`
+
+### Supabase Free Plan Keep-Alive
+The scheduled Netlify function [`netlify/functions/supabase-keepalive.mjs`](netlify/functions/supabase-keepalive.mjs) runs daily at `03:17 UTC` and calls the read-only `project_keepalive` RPC to prevent Free Plan inactivity pauses.
+
+1. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in **Netlify → Project configuration → Environment variables**.
+2. Ensure migration `009_project_keepalive.sql` is applied.
+3. Verify once via **Netlify → Functions → supabase-keepalive → Run now**.
+
+---
+
+## Mobile PWA & Thermal Receipt Printing
+
+### Install as a Progressive Web App (PWA)
+Both Admin and Staff workspaces live in the same responsive web app:
+- **Android Chrome**: Sign in and tap **Add POS to home screen**, or open Chrome's menu → **Install app**.
+- **iOS Safari**: Tap **Share** → **Add to Home Screen**.
+
+### Thermal Receipt Printing (Web & Android Tablet)
+- **Web / PWA**: Clicking **Print receipt** opens the OS print dialog using an isolated print snapshot so background Realtime refreshes cannot interrupt printing. Supports 58mm and 80mm roll media.
+- **Android Tablet App (`mobile/`)**: Wraps the Staff POS in a locked-down WebView with a native Bluetooth ESC/POS raster module (`HalaraPrinterModule`) for direct one-tap printing to paired thermal printers (e.g., RP30A-UB). See [`mobile/README.md`](mobile/README.md) for APK build details.
+- **Printer Diagnostics**: Open `/print-check.html` on the deployed site to run an isolated 58mm test job with browser print-lifecycle diagnostics.
